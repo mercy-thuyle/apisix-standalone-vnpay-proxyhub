@@ -1,0 +1,4 @@
+services:
+  - id: "service-upstream-s3"
+    name: "s3"
+    upstream_id: "upstream-s3"

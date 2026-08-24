@@ -1,0 +1,4 @@
+services:
+  - id: "service-upstream-maas"
+    name: "maas"
+    upstream_id: "upstream-maas"
