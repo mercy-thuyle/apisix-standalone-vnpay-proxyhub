@@ -16,8 +16,8 @@
 set -euo pipefail
 
 IMAGE="apache/apisix:3.17.0-debian"
-TPL="/usr/local/apisix/apisix/cli/ngx_tpl.lua"
-INIT="/usr/local/apisix/apisix/init.lua"
+# TPL="/usr/local/apisix/apisix/cli/ngx_tpl.lua"
+# INIT="/usr/local/apisix/apisix/init.lua"
 VAULT="/usr/local/apisix/apisix/secret/vault.lua"
 CONFIG_YAML="/usr/local/apisix/apisix/core/config_yaml.lua"
 KAFKA_LOGGER="/usr/local/apisix/apisix/plugins/kafka-logger.lua"
@@ -29,23 +29,23 @@ echo "📂 Deploy dir: ${DEPLOY_DIR}"
 echo "   (nên là /opt/apisix/standalone/<env>)"
 echo ""
 
-# ── 1. Patch ngx_tpl.lua ──────────────────────────────────────────────────
-echo "▶ [1/5] Patch ngx_tpl.lua — xóa proxy_set_header X-Forwarded-Port..."
-docker run --rm "${IMAGE}" cat "${TPL}" > "${DEPLOY_DIR}/ngx_tpl.lua.orig"
-grep -v 'proxy_set_header.*X-Forwarded-Port' "${DEPLOY_DIR}/ngx_tpl.lua.orig" > "${DEPLOY_DIR}/ngx_tpl.lua"
-echo "  diff:"
-diff "${DEPLOY_DIR}/ngx_tpl.lua.orig" "${DEPLOY_DIR}/ngx_tpl.lua" || true
+# # ── 1. Patch ngx_tpl.lua ──────────────────────────────────────────────────
+# echo "▶ [1/5] Patch ngx_tpl.lua — xóa proxy_set_header X-Forwarded-Port..."
+# docker run --rm "${IMAGE}" cat "${TPL}" > "${DEPLOY_DIR}/ngx_tpl.lua.orig"
+# grep -v 'proxy_set_header.*X-Forwarded-Port' "${DEPLOY_DIR}/ngx_tpl.lua.orig" > "${DEPLOY_DIR}/ngx_tpl.lua"
+# echo "  diff:"
+# diff "${DEPLOY_DIR}/ngx_tpl.lua.orig" "${DEPLOY_DIR}/ngx_tpl.lua" || true
 
-# ── 2. Patch init.lua ─────────────────────────────────────────────────────
-echo ""
-echo "▶ [2/5] Patch init.lua — xóa var_x_forwarded_port khỏi upstream_proxy_headers..."
-docker run --rm "${IMAGE}" cat "${INIT}" > "${DEPLOY_DIR}/init.lua.orig"
-# Xóa dòng set_header X-Forwarded-Port (APISIX 3.16: core.request.set_header)
-# Khớp cả 2 pattern: bảng upstream_proxy_headers VÀ set_header trực tiếp
-grep -v 'set_header(api_ctx, "X-Forwarded-Port"' "${DEPLOY_DIR}/init.lua.orig" \
-  | grep -v "var_x_forwarded_port.*=.*'X-Forwarded-Port'" > "${DEPLOY_DIR}/init.lua"
-echo "  diff:"
-diff "${DEPLOY_DIR}/init.lua.orig" "${DEPLOY_DIR}/init.lua" || true
+# # ── 2. Patch init.lua ─────────────────────────────────────────────────────
+# echo ""
+# echo "▶ [2/5] Patch init.lua — xóa var_x_forwarded_port khỏi upstream_proxy_headers..."
+# docker run --rm "${IMAGE}" cat "${INIT}" > "${DEPLOY_DIR}/init.lua.orig"
+# # Xóa dòng set_header X-Forwarded-Port (APISIX 3.16: core.request.set_header)
+# # Khớp cả 2 pattern: bảng upstream_proxy_headers VÀ set_header trực tiếp
+# grep -v 'set_header(api_ctx, "X-Forwarded-Port"' "${DEPLOY_DIR}/init.lua.orig" \
+#   | grep -v "var_x_forwarded_port.*=.*'X-Forwarded-Port'" > "${DEPLOY_DIR}/init.lua"
+# echo "  diff:"
+# diff "${DEPLOY_DIR}/init.lua.orig" "${DEPLOY_DIR}/init.lua" || true
 
 # ── 3. Patch vault.lua — KV v2 support ───────────────────────────────────
 echo ""
@@ -240,15 +240,15 @@ docker run --rm -v "${DEPLOY_DIR}/kafka-logger.lua:/tmp/kafka-logger.lua:ro" "${
 # ── Tổng kết ──────────────────────────────────────────────────────────────
 echo ""
 echo "✅ Đã tạo 5 patch (5 file) tại: ${DEPLOY_DIR}"
-echo "   ngx_tpl.lua       ngx_tpl.lua.orig"
-echo "   init.lua          init.lua.orig"
+# echo "   ngx_tpl.lua       ngx_tpl.lua.orig"              # patch [1/5] đang TẮT — không tạo file này
+# echo "   init.lua          init.lua.orig"                 # patch [2/5] đang TẮT — không tạo file này
 echo "   vault.lua         vault.lua.orig"
 echo "   config_yaml.lua   config_yaml.lua.orig"
 echo "   kafka-logger.lua  kafka-logger.lua.orig   (patch [5.a] ssl + [5.b] api_version, cùng 1 file)"
 echo ""
 echo "▶ docker-compose volumes cần thêm (so với bản gốc — [4][5.a][5.b] là mới thêm gần đây):"
-echo '      - ./ngx_tpl.lua:/usr/local/apisix/apisix/cli/ngx_tpl.lua:ro'
-echo '      - ./init.lua:/usr/local/apisix/apisix/init.lua:ro'
+# echo '      - ./ngx_tpl.lua:/usr/local/apisix/apisix/cli/ngx_tpl.lua:ro'      # patch [1/5] đang TẮT
+# echo '      - ./init.lua:/usr/local/apisix/apisix/init.lua:ro'                # patch [2/5] đang TẮT
 echo '      - ./vault.lua:/usr/local/apisix/apisix/secret/vault.lua:ro'
 echo '      - ./config_yaml.lua:/usr/local/apisix/apisix/core/config_yaml.lua:ro'
 echo '      - ./kafka-logger.lua:/usr/local/apisix/apisix/plugins/kafka-logger.lua:ro'
