@@ -1,0 +1,689 @@
+<title>Link-Local Gateway Flow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#f4f6f8; --surface:#ffffff; --surface-2:#eaeef2; --ink:#151a21;
+    --muted:#586170; --accent:#1f7a8c; --accent-2:#c96a1e; --accent-soft:#dff0f2;
+    --amber-soft:#f6ead9; --border:#e0e6ec;
+    --ok:#2f8a5b; --ok-bg:#dcefe4; --warn:#bd6428;
+    --term-bg:#0f1620; --term-ink:#d8e3ec; --term-dim:#7d91a2;
+    --term-key:#5cc2d0; --term-str:#7fc98a; --term-warn:#e0a24f;
+    --shadow:0 1px 2px rgba(16,24,32,.06),0 10px 28px rgba(16,24,32,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#0b0e12; --surface:#141a21; --surface-2:#1b222b; --ink:#e6ebf1;
+      --muted:#96a1af; --accent:#4db6c7; --accent-2:#e0924f; --accent-soft:#0f2d33;
+      --amber-soft:#2c2114; --border:#232b35;
+      --ok:#55bd82; --ok-bg:#122e22; --warn:#e0924f;
+      --term-bg:#080c11; --term-ink:#d8e3ec; --term-dim:#6f8393;
+      --term-key:#5cc2d0; --term-str:#7fc98a; --term-warn:#e0a24f;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0e12; --surface:#141a21; --surface-2:#1b222b; --ink:#e6ebf1;
+    --muted:#96a1af; --accent:#4db6c7; --accent-2:#e0924f; --accent-soft:#0f2d33;
+    --amber-soft:#2c2114; --border:#232b35;
+    --ok:#55bd82; --ok-bg:#122e22; --warn:#e0924f;
+    --term-bg:#080c11; --term-ink:#d8e3ec; --term-dim:#6f8393;
+    --term-key:#5cc2d0; --term-str:#7fc98a; --term-warn:#e0a24f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.4);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.62;font-size:16px;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1320px;margin:0 auto;padding:clamp(20px,4vw,52px) clamp(16px,4vw,32px) 100px}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,"Cascadia Code",Consolas,monospace}
+  .eyebrow{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-size:clamp(1.9rem,5vw,2.8rem);line-height:1.06;margin:.35em 0 .25em;
+    letter-spacing:-.02em;text-wrap:balance;font-weight:760}
+  h2{font-size:clamp(1.25rem,3vw,1.55rem);margin:0;letter-spacing:-.01em;
+    text-wrap:balance;font-weight:720}
+  h3{font-size:1.02rem;margin:0 0 .3em;font-weight:700}
+  p{margin:.6em 0}
+  a{color:var(--accent)}
+  .lede{font-size:1.14rem;color:var(--muted);max-width:66ch;text-wrap:pretty}
+  section{margin-top:clamp(42px,7vw,74px)}
+  .sec-head{display:flex;align-items:baseline;gap:.6em;margin-bottom:1.1em;
+    padding-bottom:.7em;border-bottom:1px solid var(--border)}
+  .sec-head .n{font-family:ui-monospace,monospace;color:var(--accent);font-size:.9rem;
+    font-weight:700;flex:none}
+
+  /* pipeline strip */
+  .strip{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:26px;
+    font-family:ui-monospace,monospace;font-size:.8rem}
+  .strip .node{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+    padding:6px 10px;box-shadow:var(--shadow);white-space:nowrap}
+  .strip .node b{color:var(--accent)}
+  .strip .ar{color:var(--muted);font-weight:700}
+
+  /* terminal */
+  .term{background:var(--term-bg);color:var(--term-ink);border-radius:12px;padding:16px 18px;
+    font-family:ui-monospace,monospace;font-size:.83rem;line-height:1.7;overflow-x:auto;
+    box-shadow:var(--shadow);border:1px solid rgba(255,255,255,.05)}
+  .term .k{color:var(--term-key)} .term .s{color:var(--term-str)}
+  .term .d{color:var(--term-dim)} .term .w{color:var(--term-warn)}
+  .term .c{color:var(--term-dim)}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:clamp(16px,3vw,24px);box-shadow:var(--shadow)}
+
+  /* flow diagram */
+  .diagram{overflow-x:auto;padding:8px 0}
+  svg.flow{display:block;min-width:1420px;max-width:100%;height:auto}
+  .b{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+  .b.acc{stroke:var(--accent)} .b.hub{stroke:var(--accent-2)}
+  .t{fill:var(--ink);font-family:system-ui,sans-serif;font-size:13px;font-weight:700}
+  .sub{fill:var(--muted);font-family:ui-monospace,monospace;font-size:10px}
+  .ln{stroke:var(--accent);stroke-width:2;fill:none;marker-end:url(#ah)}
+  .lbl{fill:var(--accent);font-family:ui-monospace,monospace;font-size:10px;font-weight:700}
+  .id{fill:var(--accent-2);font-family:ui-monospace,monospace;font-size:10px;font-weight:700}
+  .zone{fill:none;stroke:var(--border);stroke-dasharray:4 4;stroke-width:1.2}
+  .zonelbl{fill:var(--muted);font-family:ui-monospace,monospace;font-size:9px;letter-spacing:.08em}
+
+  /* hop list */
+  ol.hops{list-style:none;counter-reset:h;padding:0;margin:0;display:flex;flex-direction:column;gap:16px}
+  ol.hops>li{counter-increment:h;background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;padding:18px 20px;box-shadow:var(--shadow);position:relative}
+  ol.hops>li::before{content:counter(h);position:absolute;left:-11px;top:18px;
+    width:26px;height:26px;border-radius:8px;background:var(--accent);color:#fff;
+    font-family:ui-monospace,monospace;font-weight:700;font-size:.82rem;
+    display:grid;place-items:center;box-shadow:var(--shadow)}
+  ol.hops h3{display:flex;align-items:center;gap:.5em;flex-wrap:wrap}
+  ol.hops h3 .where{font-family:ui-monospace,monospace;font-size:.72rem;font-weight:700;
+    color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px}
+  .xform{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:.7em 0 .2em;
+    font-family:ui-monospace,monospace;font-size:.8rem}
+  .xform .pkt{background:var(--surface-2);border:1px solid var(--border);border-radius:7px;
+    padding:3px 9px}
+  .xform .to{color:var(--accent-2);font-weight:700}
+  code.inl{font-family:ui-monospace,monospace;background:var(--surface-2);padding:1px 5px;
+    border-radius:5px;font-size:.85em}
+
+  /* rationale grid */
+  .grid{display:grid;gap:14px;grid-template-columns:1fr}
+  @media(min-width:720px){.grid{grid-template-columns:1fr 1fr}}
+  .why{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:15px 17px}
+  .why h3{font-size:.97rem;display:flex;gap:.5em;align-items:center}
+  .why .tag{font-family:ui-monospace,monospace;font-size:.66rem;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--accent-2);
+    background:var(--amber-soft);padding:2px 7px;border-radius:6px}
+  .why p{margin:.3em 0 0;font-size:.9rem;color:var(--muted)}
+
+  /* components table */
+  .tw{overflow-x:auto;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:620px;background:var(--surface)}
+  th,td{text-align:left;padding:11px 14px;vertical-align:top;font-size:.88rem;
+    border-bottom:1px solid var(--border)}
+  thead th{background:var(--surface-2);font-size:.7rem;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);font-weight:700}
+  tbody tr:last-child td{border-bottom:none}
+  td.mono,th.mono{font-family:ui-monospace,monospace;font-size:.82rem}
+  .foot{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);
+    color:var(--muted);font-size:.82rem}
+
+  /* zoned diagram */
+  .zc-tenant{fill:color-mix(in srgb,var(--accent-2) 9%,transparent);stroke:var(--accent-2);stroke-dasharray:5 4;stroke-width:1.3}
+  .zc-node{fill:none;stroke:var(--muted);stroke-width:1.5}
+  .zc-inner{fill:var(--surface-2);stroke:var(--border);stroke-width:1.2}
+  .zc-vol{fill:color-mix(in srgb,var(--accent-2) 12%,transparent);stroke:var(--accent-2);stroke-width:1.1}
+  .zc-dbg{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.2}
+  .zc-svc{fill:color-mix(in srgb,var(--accent) 10%,transparent);stroke:var(--accent);stroke-dasharray:5 4;stroke-width:1.3}
+  .zc-pub{fill:color-mix(in srgb,var(--muted) 12%,transparent);stroke:var(--muted);stroke-dasharray:2 3;stroke-width:1.4}
+  .znm{font-family:ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:.03em;fill:var(--muted)}
+  .znm.warn{fill:var(--accent-2)} .znm.ok{fill:var(--accent)}
+  .cross{stroke:var(--accent-2);stroke-width:2;fill:none;marker-end:url(#ah2);stroke-dasharray:6 3}
+  .flow-title{fill:var(--ink);font-family:system-ui,sans-serif;font-size:12px;font-weight:750}
+  .flow-note{fill:var(--muted);font-family:ui-monospace,monospace;font-size:9px}
+  .flow-chip-warn{fill:var(--amber-soft);stroke:var(--accent-2);stroke-width:1}
+  .flow-divider{stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
+  .edge-chip{fill:var(--surface);stroke:var(--border);stroke-width:1}
+  .edge-chip.acc{stroke:var(--accent)}
+  .edge-chip.warn{fill:var(--amber-soft);stroke:var(--accent-2)}
+  .edge-txt{fill:var(--accent);font-family:ui-monospace,monospace;font-size:9.5px;font-weight:750}
+  .edge-txt.warn{fill:var(--accent-2)}
+
+  /* zone cards */
+  .zgrid{display:flex;flex-direction:column;gap:12px;margin-top:20px}
+  .zcard{display:grid;grid-template-columns:auto 1fr;gap:0 16px;align-items:start;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    padding:14px 16px;box-shadow:var(--shadow);border-left:4px solid var(--accent)}
+  .zcard.untrust{border-left-color:var(--accent-2)}
+  .zcard.host{border-left-color:var(--muted)}
+  .zcard.svc{border-left-color:var(--accent)}
+  .zcard .zn{grid-column:1;font-weight:750;font-size:.98rem;min-width:150px}
+  .zcard .zt{grid-column:1;font-family:ui-monospace,monospace;font-size:.66rem;
+    text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:3px}
+  .zcard .zd{grid-column:2;grid-row:1 / span 3;font-size:.9rem}
+  .zcard .zd b{color:var(--ink)}
+  .zcard .bound{display:block;margin-top:.4em;font-size:.85rem;color:var(--muted)}
+  .zcard .bound::before{content:"⟶ ranh giới: ";font-family:ui-monospace,monospace;
+    font-size:.72rem;color:var(--accent);font-weight:700}
+  @media(max-width:560px){.zcard{grid-template-columns:1fr}.zcard .zd{grid-column:1;grid-row:auto}}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px;font-size:.78rem;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:22px;height:12px;border-radius:3px;display:inline-block;border:1px solid var(--border)}
+
+  .api-flow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:14px 0 18px;
+    font-family:ui-monospace,monospace;font-size:.8rem}
+  .api-flow .step{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+    padding:6px 10px;white-space:nowrap}
+  .api-flow .step.primary{background:var(--accent-soft);border-color:var(--accent);font-weight:700}
+  .api-flow .step.guard{background:var(--amber-soft);border-color:var(--accent-2);font-weight:700}
+  .api-flow .arrow{color:var(--muted);font-weight:800}
+  .kv{display:grid;grid-template-columns:minmax(170px,220px) 1fr;gap:8px 16px;margin:14px 0}
+  .kv .k{font-family:ui-monospace,monospace;font-size:.82rem;color:var(--accent);font-weight:700}
+  .kv .v{font-size:.9rem}
+  .verified{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;
+    padding:2px 8px;border-radius:999px;background:var(--ok-bg);color:var(--ok);
+    font-size:.72rem;font-weight:750;font-family:ui-monospace,monospace}
+  .role-chain{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin-top:12px;
+    font-family:ui-monospace,monospace;font-size:.78rem}
+  .role-chain .r{padding:5px 8px;border-radius:7px;background:var(--surface-2);
+    border:1px solid var(--border)}
+  .role-chain .a{color:var(--accent-2);font-weight:800}
+  @media(max-width:620px){.kv{grid-template-columns:1fr}.kv .v{margin-bottom:6px}}
+
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Kiến trúc &amp; luồng dữ liệu · link-local-private-gateway</div>
+    <h1>VM tới dịch vụ nội bộ đi qua đâu?</h1>
+    <p class="lede">Cách service <span class="mono">link-local-private-gateway</span> đưa một VM tenant từ địa chỉ metadata <span class="mono">169.254.169.254</span>, qua HAProxy và socat trong <b>container macvlan</b> đứng thẳng trên <span class="mono">VLAN 180</span> (không admin, không netns), tới <b>proxyhub</b> <span class="mono">172.26.8.30:8443</span> — nơi soi request và phân bổ tới VCR / S3 / MAAS.</p>
+
+    <div class="strip" aria-label="Tom tat pipeline">
+      <span class="node">VM <b>kaas</b></span><span class="ar">→</span>
+      <span class="node"><b>169.254.169.254:443</b></span><span class="ar">→</span>
+      <span class="node">br-int <span style="opacity:.7">OVS flow</span></span><span class="ar">→</span>
+      <span class="node">HAProxy <span style="opacity:.7">mode tcp</span></span><span class="ar">→</span>
+      <span class="node">unix sock</span><span class="ar">→</span>
+      <span class="node">socat · <b>macvlan v180</b></span><span class="ar">→</span>
+      <span class="node"><b>QoS · tc @ host vlan.180</b></span><span class="ar">→</span>
+      <span class="node"><b>proxyhub .30:8443</b></span><span class="ar">→</span>
+      <span class="node">VCR·S3·MAAS</span>
+    </div>
+  </header>
+
+  <!-- OVERVIEW -->
+  <section id="tong-quan">
+    <div class="sec-head"><span class="n">01</span><h2>Ý tưởng cốt lõi</h2></div>
+    <p>OVN đã sẵn có hạ tầng metadata: mỗi network có một namespace <span class="mono">ovnmeta-&lt;network_id&gt;</span> chạy HAProxy. Khi VM gửi tới <span class="mono">169.254.169.254</span>, gói vào <b>br-int</b> và bị các <b>OpenFlow do OVN cài</b> chặn lại — khớp đích là IP metadata rồi <b>output tới metadata localport</b> của đúng network đó (interface mang <span class="mono">.169</span> nằm trong namespace). VM không tự chọn được namespace nào. Service này <b>bám lên chính đường ống đó</b>: một <em>custom HAProxy template</em> thêm một listener <span class="mono">:443</span> bên cạnh metadata <span class="mono">:80</span>. Nhờ vậy VM có một lối riêng ra các <b>dịch vụ public</b> (VCR/S3/MAAS) <b>qua một proxyhub riêng tư</b> làm trung gian — VM không cần route, không có đường public trực tiếp, chỉ dùng địa chỉ link-local vốn đã có.</p>
+    <p>Ba tính chất định hình toàn bộ thiết kế:</p>
+    <ul>
+      <li><b>Danh tính không giả được.</b> HAProxy nhét <span class="mono">network_id</span> của chính namespace đó vào PROXY-v2 (<span class="mono">unique-id</span>). VM không tự đặt được network_id — nó do hạ tầng gán theo namespace VM rơi vào.</li>
+      <li><b>Passthrough thuần L4.</b> HAProxy chạy <span class="mono">mode tcp</span>, <b>không</b> giải mã TLS. TLS đi thẳng end-to-end tới dịch vụ; danh tính đi kèm ngoài luồng (out-of-band) trong header PROXY-v2.</li>
+      <li><b>Backend cố định.</b> socat chỉ có một đích duy nhất — proxyhub <span class="mono">.30:8443</span>. Không có đích động, không exec → không thể biến thành port-forwarder.</li>
+    </ul>
+  </section>
+
+  <!-- ZONES -->
+  <section id="cac-vung">
+    <div class="sec-head"><span class="n">02</span><h2>Các vùng &amp; ranh giới</h2></div>
+    <p>Sơ đồ dưới đây ưu tiên thể hiện <b>đường dữ liệu</b> và <b>trust boundary</b>. Container gateway dùng <b>macvlan trên VLAN 180</b>, không host-net, không netns/nsenter. QoS/tc nằm trên <b>host parent vlan.180</b>; mũi tên <span style="color:var(--accent-2)">cam nét đứt</span> đánh dấu traffic <b>rời compute node</b> sang mạng dịch vụ.</p>
+    <div class="card diagram" style="padding:20px">
+      <svg class="flow" viewBox="0 0 1540 430" role="img"
+           aria-label="Luồng VM qua OVS, HAProxy, unix socket, container macvlan, QoS và proxyhub">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent-2)"/>
+          </marker>
+        </defs>
+
+        <!-- TRUST ZONES -->
+        <rect class="zc-tenant" x="18" y="64" width="150" height="302" rx="14"/>
+        <text class="znm warn" x="32" y="84">TENANT</text>
+        <text class="flow-note" x="32" y="100" style="fill:var(--accent-2)">UNTRUSTED</text>
+
+        <rect class="zc-node" x="188" y="38" width="1002" height="354" rx="16"/>
+        <text class="znm" x="204" y="60">COMPUTE NODE</text>
+        <text class="flow-note" x="204" y="77">local processing</text>
+
+        <rect class="zc-svc" x="1214" y="64" width="308" height="158" rx="14"/>
+        <text class="znm ok" x="1230" y="85">PROXYHUB · PRIVATE</text>
+        <text class="flow-note" x="1230" y="101">off-host · service network</text>
+
+        <rect class="zc-pub" x="1214" y="244" width="308" height="122" rx="14"/>
+        <text class="znm" x="1230" y="265">DỊCH VỤ ĐÍCH · PUBLIC</text>
+
+        <!-- MAIN PIPELINE -->
+        <rect class="b" x="40" y="176" width="106" height="70" rx="11"/>
+        <text class="t" x="93" y="204" text-anchor="middle">VM tenant</text>
+        <text class="sub" x="93" y="222" text-anchor="middle">network kaas</text>
+
+        <rect class="b" x="232" y="168" width="136" height="86" rx="11" style="stroke:var(--accent-2);stroke-width:1.8"/>
+        <text class="t" x="300" y="198" text-anchor="middle">br-int · OVS</text>
+        <text class="sub" x="300" y="217" text-anchor="middle">OpenFlow · OVN</text>
+        <text class="sub" x="300" y="235" text-anchor="middle">intercept dst .169</text>
+
+        <rect class="zc-inner" x="438" y="122" width="182" height="176" rx="12"/>
+        <text class="znm ok" x="452" y="143">ovnmeta-&lt;netid&gt;</text>
+        <text class="flow-note" x="452" y="159">metadata netns</text>
+
+        <rect class="b acc" x="454" y="176" width="150" height="72" rx="10"/>
+        <text class="t" x="529" y="201" text-anchor="middle">HAProxy</text>
+        <text class="sub" x="529" y="219" text-anchor="middle">:443 · TCP passthrough</text>
+        <text class="sub" x="529" y="236" text-anchor="middle">rate-limit · network_id</text>
+
+        <rect class="b acc" x="694" y="176" width="146" height="72" rx="10"/>
+        <text class="t" x="767" y="201" text-anchor="middle">Unix socket</text>
+        <text class="sub" x="767" y="219" text-anchor="middle">link-local-gw/…</text>
+        <text class="sub" x="767" y="236" text-anchor="middle">0660 · gid 42435</text>
+        <rect class="flow-chip-warn" x="715" y="264" width="104" height="24" rx="12"/>
+        <text class="flow-note" x="767" y="280" text-anchor="middle" style="fill:var(--accent-2)">shared volume</text>
+
+        <!-- Gateway container: unprivileged, macvlan network -->
+        <rect class="zc-inner" x="878" y="102" width="220" height="216" rx="14"/>
+        <text class="znm" x="894" y="124">gateway container</text>
+        <text class="flow-note" x="894" y="142">user 42435 · no cap · no netns</text>
+
+        <rect class="zc-dbg" x="894" y="160" width="188" height="134" rx="12"/>
+        <text class="znm ok" x="908" y="181">macvlan @ vlan.180</text>
+        <text class="flow-note" x="908" y="198">172.25.180.125/24</text>
+        <text class="flow-note" x="908" y="213">gw → 172.25.180.1</text>
+
+        <rect class="b acc" x="910" y="230" width="76" height="50" rx="9"/>
+        <text class="t" x="948" y="251" text-anchor="middle">socat</text>
+        <text class="sub" x="948" y="267" text-anchor="middle">byte pipe</text>
+
+        <rect class="b acc" x="1000" y="230" width="66" height="50" rx="9"/>
+        <text class="t" x="1033" y="250" text-anchor="middle">macvlan</text>
+        <text class="sub" x="1033" y="267" text-anchor="middle">v180</text>
+
+        <!-- QoS is on host parent, not inside container -->
+        <rect class="b" x="1110" y="224" width="64" height="62" rx="10" style="stroke:var(--accent-2);stroke-width:1.8"/>
+        <text class="t" x="1142" y="247" text-anchor="middle">QoS</text>
+        <text class="sub" x="1142" y="264" text-anchor="middle">tc</text>
+        <text class="sub" x="1142" y="279" text-anchor="middle">parent v180</text>
+
+        <rect class="b hub" x="1242" y="126" width="252" height="72" rx="11"/>
+        <text class="t" x="1368" y="151" text-anchor="middle">proxyhub</text>
+        <text class="sub" x="1368" y="169" text-anchor="middle">172.26.8.30:8443</text>
+        <text class="sub" x="1368" y="186" text-anchor="middle">network_id · policy · egress</text>
+
+        <rect class="b" x="1242" y="294" width="72" height="42" rx="8"/>
+        <text class="t" x="1278" y="320" text-anchor="middle">VCR</text>
+        <rect class="b" x="1332" y="294" width="72" height="42" rx="8"/>
+        <text class="t" x="1368" y="320" text-anchor="middle">S3</text>
+        <rect class="b" x="1422" y="294" width="72" height="42" rx="8"/>
+        <text class="t" x="1458" y="320" text-anchor="middle">MAAS</text>
+
+        <!-- ARROWS + LABELS -->
+        <path class="ln" d="M146 211 H232"/>
+        <g><rect class="edge-chip acc" x="153" y="187" width="72" height="19" rx="9.5"/><text class="edge-txt" x="189" y="200" text-anchor="middle">.169:443</text></g>
+
+        <path class="ln" d="M368 211 H454"/>
+        <g><rect class="edge-chip acc" x="376" y="187" width="70" height="19" rx="9.5"/><text class="edge-txt" x="411" y="200" text-anchor="middle">localport</text></g>
+
+        <rect class="flow-chip-warn" x="244" y="270" width="112" height="24" rx="12"/>
+        <text class="flow-note" x="300" y="286" text-anchor="middle" style="fill:var(--accent-2)">match dst=.169</text>
+
+        <path class="ln" d="M604 211 H694"/>
+        <g><rect class="edge-chip acc" x="611" y="187" width="76" height="19" rx="9.5"/><text class="edge-txt" x="649" y="200" text-anchor="middle">PROXY-v2</text></g>
+
+        <path class="ln" d="M840 211 H864 V255 H910"/>
+        <path class="ln" d="M986 255 H1000"/>
+        <path class="ln" d="M1066 255 H1110"/>
+
+        <path class="cross" d="M1174 255 H1202 V162 H1242"/>
+        <g><rect class="edge-chip warn" x="1177" y="206" width="92" height="20" rx="10"/><text class="edge-txt warn" x="1223" y="220" text-anchor="middle">TCP :8443</text></g>
+        <text class="edge-txt warn" x="1202" y="243" text-anchor="middle">rời node</text>
+
+        <path class="cross" d="M1368 198 V294"/>
+        <g><rect class="edge-chip warn" x="1381" y="236" width="78" height="19" rx="9.5"/><text class="edge-txt warn" x="1420" y="249" text-anchor="middle">policy allow</text></g>
+
+        <line class="flow-divider" x1="204" y1="340" x2="1180" y2="340"/>
+        <text class="flow-note" x="204" y="360">local trên compute: OVS → ovnmeta/HAProxy → unix socket → container socat/macvlan → tc @ host vlan.180</text>
+      </svg>
+    </div>
+
+    <div style="margin-top:12px">
+      <div class="legend" style="margin-top:0">
+        <span><i style="background:color-mix(in srgb,var(--accent-2) 14%,transparent);border-color:var(--accent-2)"></i> không tin / rời node</span>
+        <span><i style="background:var(--surface-2)"></i> nội bộ compute node</span>
+        <span><i style="background:var(--accent-soft);border-color:var(--accent)"></i> container macvlan v180</span>
+        <span><i style="background:color-mix(in srgb,var(--accent) 14%,transparent);border-color:var(--accent)"></i> proxyhub (riêng tư)</span>
+        <span><i style="background:color-mix(in srgb,var(--muted) 16%,transparent);border-color:var(--muted)"></i> dịch vụ public</span>
+        <span><i style="background:var(--surface);border-color:var(--accent-2)"></i> 🚦 QoS/tc @ host parent vlan.180</span>
+      </div>
+    </div>
+
+    <!-- ZOOM: OVS chan luong .169 -->
+    <div class="card" style="margin-top:18px">
+      <h3 style="margin-top:0;display:flex;align-items:center;gap:.5em">🔎 Cận cảnh: OVS (br-int) chặn luồng <span class="mono">.169</span></h3>
+      <p class="meta" style="margin-top:2px">ovn-controller biên dịch logical flow của OVN thành OpenFlow trên br-int. Hai flow quyết định việc chặn <span class="mono">169.254.169.254</span> và giao vào namespace — <b>xử lý local trên chassis</b>.</p>
+      <div class="diagram" style="padding:4px 0">
+        <svg viewBox="0 0 900 214" role="img" aria-label="Can canh OVS chan luong 169" style="min-width:720px">
+          <defs>
+            <marker id="ahz" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+          <!-- VM port -->
+          <rect class="b" x="10" y="78" width="124" height="58" rx="10"/>
+          <text class="t" x="72" y="102" text-anchor="middle">cổng OVS của VM</text>
+          <text class="sub" x="72" y="119" text-anchor="middle">logical switch port</text>
+          <!-- br-int -->
+          <rect class="b" x="196" y="30" width="452" height="156" rx="12" style="stroke:var(--accent-2);stroke-width:1.8"/>
+          <text class="znm warn" x="212" y="50">br-int · OpenFlow (ovn-controller)</text>
+          <rect x="212" y="62" width="420" height="52" rx="8" style="fill:var(--surface-2);stroke:var(--border)"/>
+          <text class="sub" x="224" y="80" style="font-size:10.5px">① ARP  <tspan style="fill:var(--accent-2);font-weight:700">arp_tpa=169.254.169.254</tspan></text>
+          <text class="sub" x="224" y="102" style="font-size:10.5px">→ OVN ARP responder trả <tspan style="fill:var(--ink);font-weight:700">MAC của metadata localport</tspan></text>
+          <rect x="212" y="120" width="420" height="56" rx="8" style="fill:var(--surface-2);stroke:var(--border)"/>
+          <text class="sub" x="224" y="139" style="font-size:10.5px">② IP  <tspan style="fill:var(--accent-2);font-weight:700">dst=169.254.169.254</tspan> (mọi port, cả :80 lẫn :443)</text>
+          <text class="sub" x="224" y="161" style="font-size:10.5px">→ <tspan style="fill:var(--ink);font-weight:700">output</tspan> cổng tap trong ovnmeta ns  ·  <tspan style="fill:var(--accent);font-weight:700">LOCAL trên chassis</tspan></text>
+          <!-- tap in ns -->
+          <rect class="b acc" x="708" y="72" width="182" height="70" rx="10"/>
+          <text class="t" x="799" y="96" text-anchor="middle">tap&lt;id&gt; · ovnmeta ns</text>
+          <text class="sub" x="799" y="113" text-anchor="middle">mang .169 · HAProxy</text>
+          <text class="sub" x="799" y="127" text-anchor="middle">bind :443 ở đây</text>
+          <!-- arrows -->
+          <path class="ln" style="marker-end:url(#ahz)" d="M134 107 H196"/>
+          <text class="lbl" x="165" y="99" text-anchor="middle">ofport vào</text>
+          <path class="ln" style="marker-end:url(#ahz)" d="M648 148 H678 V107 H708"/>
+          <text class="lbl" x="678" y="99" text-anchor="middle">ofport ra · local</text>
+        </svg>
+      </div>
+      <div class="term" style="margin-top:8px" aria-label="OpenFlow khai niem">
+<span class="c"># Khai niem (ovn-controller sinh tu logical flow) - xem thuc te bang:</span>
+<span class="c">#   ovs-ofctl dump-flows br-int | grep 169.254.169.254</span>
+<span class="k">table=…</span>, arp, <span class="s">arp_tpa=169.254.169.254</span>   actions=<span class="w">ARP_responder(MAC=metadata-localport)</span>
+<span class="k">table=…</span>, ip,  <span class="s">nw_dst=169.254.169.254</span>    actions=<span class="w">output:&lt;ofport tap trong ovnmeta-&lt;netid&gt;&gt;</span>
+        </div>
+      <ul style="margin:.4em 0 0">
+        <li><b>ARP trước.</b> VM có host-route <code class="inl">169.254.169.254</code> (DHCP option 121); nó ARP hỏi .169, OVN trả về MAC của metadata localport → VM gửi gói tới đúng MAC đó.</li>
+        <li><b>Khớp theo IP, không theo cổng.</b> Flow chỉ match <code class="inl">nw_dst=.169</code> → nên <code class="inl">:443</code> (gateway) đi chung đường với <code class="inl">:80</code> (metadata thường). Đây là chỗ custom template "bám" vào.</li>
+        <li><b>Local-only.</b> metadata localport tồn tại ở mọi chassis và traffic <b>được xử lý nội bộ trên compute node</b>.</li>
+      </ul>
+    </div>
+<div class="zgrid">
+      <div class="zcard untrust">
+        <div class="zn">VÙNG TENANT</div><div class="zt">không tin</div>
+        <div class="zd"><b>VM trên network kaas.</b> Nơi kẻ tấn công có thể đứng. VM chỉ biết địa chỉ link-local <code class="inl">169.254.169.254</code>, không thấy IP/route nội bộ nào.
+          <span class="bound">chỉ mở được TLS tới <code class="inl">.169:443</code>; <b>OVN</b> quyết định gói vào namespace nào — VM không chọn được, không giả được network khác.</span>
+        </div>
+      </div>
+      <div class="zcard host">
+        <div class="zn">ovnmeta-&lt;netid&gt; netns</div><div class="zt">nội bộ node · 1/network</div>
+        <div class="zd"><b>HAProxy của riêng từng network.</b> Là net + mount namespace do neutron dựng; mỗi network một cái. Chạy <code class="inl">mode tcp</code> (passthrough) và gắn <code class="inl">network_id</code> của chính namespace đó.
+          <span class="bound">chỉ traffic tới <code class="inl">.169</code> của network được OVN lái vào; tenant không vào được ns; network_id buộc chặt theo ns.</span>
+        </div>
+      </div>
+      <div class="zcard host">
+        <div class="zn">Volume dùng chung</div><div class="zt">nội bộ node · mount</div>
+        <div class="zd"><b>Unix socket</b> <code class="inl">neutron_metadata_socket</code> bind-mount vào <em>cả</em> HAProxy lẫn container gateway — đây là chỗ hai mount namespace gặp nhau.
+          <span class="bound">socket <code class="inl">0660 group 42435</code> → chỉ HAProxy (gid neutron) ghi được; subdir <code class="inl">link-local-gw/</code> riêng nên container không thấy file khác của agent.</span>
+        </div>
+      </div>
+      <div class="zcard host">
+        <div class="zn">Container macvlan</div><div class="zt">nội bộ node · macvlan v180</div>
+        <div class="zd"><b>socat</b> chạy trong container <b>không quyền admin</b> (<code class="inl">user 42435:42435</code>, <code class="inl">cap_add: []</code>, không privileged, không host-net, không netns). Container có <b>interface macvlan đứng thẳng trên <code class="inl">vlan.180</code></b> — IP <code class="inl">172.25.180.125/24</code>, gw <code class="inl">.1</code> — <em>đường ra backend mà tenant không có</em>.
+          <span class="bound">socat đích <b>cố định</b> <code class="inl">.30:8443</code>, không exec → không thành bàn đạp; macvlan <b>bỏ qua netfilter host</b> nên phải dựa vào VLAN 180 là segment sạch + ACL switch + proxyhub authz.</span>
+        </div>
+      </div>
+      <div class="zcard svc">
+        <div class="zn">PROXYHUB</div><div class="zt">riêng tư · off-host</div>
+        <div class="zd"><b>proxyhub <code class="inl">.30:8443</code> — chốt kiểm soát riêng tư.</b> Nằm ngoài compute node nhưng <b>không public</b>. Bóc <code class="inl">network_id</code> từ PROXY-v2, soi request, rồi mới egress ra dịch vụ public.
+          <span class="bound">chỉ tới được từ container macvlan trên vlan.180; <b>phân quyền thật</b> (theo network_id) nằm ở đây — quyết định network nào được ra service public nào.</span>
+        </div>
+      </div>
+      <div class="zcard host" style="border-left-color:var(--muted)">
+        <div class="zn">DỊCH VỤ PUBLIC 🌐</div><div class="zt">public · ngoài</div>
+        <div class="zd"><b>VCR · S3 · MAAS</b> — các dịch vụ <b>public</b>. VM <em>không</em> đi thẳng tới đây; luôn phải qua proxyhub riêng tư làm trung gian.
+          <span class="bound">chỉ nhận kết nối do proxyhub egress ra; VM tenant không có đường public trực tiếp → proxyhub là điểm kiểm soát duy nhất ra public.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOP BY HOP -->
+  <section id="tung-hop">
+    <div class="sec-head"><span class="n">03</span><h2>Chi tiết từng hop</h2></div>
+    <ol class="hops">
+
+      <li>
+        <h3>VM gửi tới địa chỉ metadata <span class="where">169.254.169.254:443</span></h3>
+        <p>VM mở kết nối TLS tới <span class="mono">169.254.169.254</span> — địa chỉ link-local cloud metadata mà mọi VM đều biết. OVN lái gói này vào <b>đúng</b> namespace <span class="mono">ovnmeta-&lt;network_id&gt;</span> của network chứa VM (VM không chọn được namespace nào). Cổng <span class="mono">:80</span> vẫn là metadata thường; <span class="mono">:443</span> là listener do custom template thêm.</p>
+        <div class="xform">
+          <span class="pkt">TLS ClientHello</span><span class="to">→</span><span class="pkt">dst 169.254.169.254:443</span>
+        </div>
+      </li>
+
+      <li>
+        <h3>OVS (br-int) chặn <span class="mono">.169</span> và đẩy vào namespace <span class="where">OpenFlow · OVN</span></h3>
+        <p>Gói tới <code class="inl">169.254.169.254</code> <b>không route ra ngoài</b>: khi vào <b>br-int</b>, các <b>OpenFlow do OVN biên dịch &amp; cài</b> khớp đích là IP metadata và <b>output tới metadata localport</b> của network đó — chính là interface mang <code class="inl">.169</code> nằm trong <code class="inl">ovnmeta-&lt;netid&gt;</code>. Vì flow khớp theo <b>IP</b> (không theo cổng), traffic <code class="inl">:443</code> cũng được đưa vào ns y như metadata <code class="inl">:80</code> — đó là lý do listener <code class="inl">:443</code> của custom template <b>dùng chung được</b> đúng đường ống metadata sẵn có.</p>
+        <div class="xform">
+          <span class="pkt">dst .169 (bất kỳ port)</span><span class="to">→</span><span class="pkt">OpenFlow match</span><span class="to">→</span><span class="pkt to">metadata localport → ovnmeta ns</span>
+        </div>
+      </li>
+
+      <li>
+        <h3>HAProxy nhận, rate-limit, gắn danh tính <span class="where">mode tcp · passthrough</span></h3>
+        <p>Listener chạy <span class="mono">mode tcp</span> nên <b>không giải mã TLS</b> — chỉ chuyển byte. Trước khi chuyển, nó rate-limit theo IP nguồn (stick-table) và gắn <span class="mono">network_id</span> vào định danh kết nối để đẩy xuống backend.</p>
+        <div class="term" aria-label="Cau hinh HAProxy">
+<span class="c"># custom template render cho tung network (host=169.254.169.254, network_id=&lt;uuid&gt;)</span>
+<span class="k">listen</span> link_local_private_gateway
+    <span class="k">mode</span> tcp
+    <span class="k">bind</span> <span class="s">169.254.169.254:443</span>
+    <span class="k">stick-table</span> type ip size 100k expire 60s store conn_rate(10s),conn_cur
+    <span class="k">tcp-request connection</span> track-sc0 src
+    <span class="k">tcp-request connection</span> reject <span class="w">if { sc0_conn_rate gt 50 }</span>
+    <span class="k">tcp-request connection</span> reject <span class="w">if { sc0_conn_cur  gt 30 }</span>
+    <span class="k">unique-id-format</span> <span class="s">&lt;network_id&gt;</span>   <span class="c"># danh tinh tenant</span>
+    <span class="k">default_backend</span> link_local_private_gateway_backend
+        </div>
+        <div class="xform">
+          <span class="pkt">TLS bytes</span><span class="to">+</span><span class="pkt">network_id gắn vào unique-id</span>
+        </div>
+      </li>
+
+      <li>
+        <h3>Đẩy vào unix socket kèm PROXY-v2 <span class="where">/link-local-gw/…</span></h3>
+        <p>Backend không phải TCP mà là một <b>unix socket</b> trên volume dùng chung với agent. HAProxy ghi <span class="mono">send-proxy-v2</span> — thêm một header nhị phân PROXY-v2 mang <span class="mono">unique-id</span> (chính là network_id) đứng trước luồng TLS. Socket <span class="mono">0660 group 42435</span> nên chỉ HAProxy (uid/gid neutron) mới ghi được — tenant không chạm tới.</p>
+        <div class="term">
+<span class="k">backend</span> link_local_private_gateway_backend
+    <span class="k">mode</span> tcp
+    <span class="k">server</span> link_local_private_gateway <span class="s">unix@/var/lib/neutron/kolla/link-local-gw/link_local_private_gateway</span> <span class="w">send-proxy-v2 proxy-v2-options unique-id</span>
+        </div>
+        <div class="xform">
+          <span class="pkt">[PROXY-v2: network_id]</span><span class="to">+</span><span class="pkt">TLS bytes</span><span class="to">→</span><span class="pkt">unix socket</span>
+        </div>
+      </li>
+
+      <li>
+        <h3>socat trong <span class="where">container macvlan (vlan.180)</span> nối socket ↔ proxyhub</h3>
+        <p>Container <span class="mono">link-local-private-gateway</span> chạy socat <b>không quyền admin</b> (<span class="mono">user 42435:42435</span>, <span class="mono">cap_add: []</span>, không privileged, không host-net, không netns/nsenter). Phía mạng là một <b>interface macvlan đứng thẳng trên <span class="mono">vlan.180</span></b> (IP <span class="mono">172.25.180.125/24</span>, gw <span class="mono">.1</span>) — <em>đường ra backend mà tenant không có</em>. Mỗi kết nối <span class="mono">fork</span> một child (trần <span class="mono">max-children=3072</span>). socat chỉ là <b>ống dẫn byte</b> — không đọc, không sửa nội dung — nối socket tới <b>đúng một đích cố định</b> <span class="mono">172.26.8.30:8443</span>. <b>QoS</b> đặt trên host parent <span class="mono">vlan.180</span> bằng <span class="mono">tc</span> (htb+fq_codel egress, IFB cho download) — traffic macvlan đi qua qdisc của interface cha nên shape được; shape tổng cả ống, không per-tenant.</p>
+        <div class="term">
+<span class="c"># entrypoint container (khong nsenter, khong cap) — chi mot dich co dinh</span>
+<span class="k">socat</span> UNIX-LISTEN:<span class="s">/socket/link_local_private_gateway</span>,unlink-early,fork,mode=0660,group=42435,max-children=3072 <span class="w">TCP:172.26.8.30:8443</span>
+        </div>
+        <div class="xform">
+          <span class="pkt">unix socket</span><span class="to">→</span><span class="pkt">TCP tới .30:8443 (byte y nguyên)</span>
+        </div>
+      </li>
+
+      <li>
+        <h3>proxyhub (riêng tư) soi &amp; egress ra dịch vụ public <span class="where">172.26.8.30:8443</span></h3>
+        <p><b>proxyhub</b> là chốt <b>riêng tư</b>: nhận PROXY-v2, <b>bóc header</b> lấy <span class="mono">network_id</span>, kiểm tra request rồi mới <b>egress ra dịch vụ public</b> — VCR (registry), S3 (object store), hoặc MAAS. VM tenant <b>không có đường public trực tiếp</b>; proxyhub là điểm ra public duy nhất. Đây cũng là nơi <b>phân quyền thật sự</b>: mọi quyết định network nào được ra service public nào nằm ở tầng này, không phải ở socat/HAProxy (hai tầng trước chỉ vận chuyển + gắn danh tính).</p>
+        <div class="xform">
+          <span class="pkt">[PROXY-v2] + TLS</span><span class="to">→</span><span class="pkt">đọc network_id</span><span class="to">→</span><span class="pkt to">VCR / S3 / MAAS</span>
+        </div>
+      </li>
+
+    </ol>
+  </section>
+
+  <!-- WHY -->
+  <section id="vi-sao">
+    <div class="sec-head"><span class="n">04</span><h2>Vì sao thiết kế như vậy</h2></div>
+    <div class="grid">
+      <div class="why">
+        <h3><span class="tag">danh tính</span> network_id qua PROXY-v2</h3>
+        <p>Không dựa vào src IP (VM có thể spoof). HAProxy trong namespace của network gán network_id — buộc chặt với network VM thực sự thuộc về, không giả được.</p>
+      </div>
+      <div class="why">
+        <h3><span class="tag">bảo mật</span> TLS passthrough</h3>
+        <p>Gateway không giải mã TLS → không thấy nội dung, không giữ khoá. Bí mật chỉ mở tại dịch vụ đích. Đổi lại: rate-limit chỉ ở mức kết nối, không phải mức request.</p>
+      </div>
+      <div class="why">
+        <h3><span class="tag">cô lập</span> container macvlan, không admin</h3>
+        <p>socat chạy user 42435, không cap/không privileged; interface macvlan đứng trên vlan.180 là đường ra backend mà VM không có. Đích cố định nên không thành bàn đạp; đổi lại macvlan bỏ qua netfilter host → cần VLAN 180 sạch + proxyhub authz.</p>
+      </div>
+      <div class="why">
+        <h3><span class="tag">tối giản quyền</span> socket 0660 + group</h3>
+        <p>Socket chỉ HAProxy (gid 42435) ghi được, không world-writable. Tiến trình lạ cùng host không nối thẳng proxyhub để vượt HAProxy được.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMPONENTS -->
+  <section id="thanh-phan">
+    <div class="sec-head"><span class="n">05</span><h2>Thành phần trên node</h2></div>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Thành phần</th><th>Ở đâu</th><th>Vai trò</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">169.254.169.254:443</td><td>ovnmeta-&lt;netid&gt; ns</td><td>Điểm vào; listener :443 do custom HAProxy template thêm.</td></tr>
+          <tr><td class="mono">br-int + OpenFlow</td><td>OVS host</td><td>OVN cài flow chặn dst .169, output tới metadata localport của network → vào đúng ns.</td></tr>
+          <tr><td class="mono">HAProxy (mode tcp)</td><td>ovnmeta-&lt;netid&gt; ns</td><td>Passthrough TLS, rate-limit /VM, gắn network_id vào PROXY-v2.</td></tr>
+          <tr><td class="mono">link_local_private_gateway</td><td class="mono">…/link-local-gw/ (0660)</td><td>Unix socket cầu nối HAProxy → socat; subdir riêng để cô lập.</td></tr>
+          <tr><td class="mono">socat</td><td>container · user 42435, không cap</td><td>Ống byte fork/connection tới đích cố định; max-children 3072. Không netns/nsenter.</td></tr>
+          <tr><td class="mono">macvlan @ vlan.180</td><td>container</td><td>Interface macvlan 172.25.180.125/24, gw .1 → đường ra proxyhub; bỏ qua netfilter host.</td></tr>
+          <tr><td class="mono">QoS · tc 🚦</td><td>host parent vlan.180</td><td>htb+fq_codel egress + IFB (ifb-v180) ingress; shape TỔNG cả ống (không per-tenant). Unit link-local-gateway-qos.service.</td></tr>
+          <tr><td class="mono">172.26.8.30:8443</td><td>proxyhub · APISIX · riêng tư, off-host</td><td>Nhận PROXY-v2 + TLS; terminate TLS, chuẩn hóa Client IP/network_id thành HTTP header, route và áp policy theo từng dịch vụ trước khi forward tới backend.</td></tr>
+          <tr><td class="mono">VCR · S3 · MAAS</td><td>public 🌐</td><td>Dịch vụ public; chỉ tới được qua proxyhub, VM không đi thẳng.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+<!-- PROXYHUB / APISIX -->
+  <section id="proxyhub-apisix">
+    <div class="sec-head"><span class="n">06</span><h2>Yêu cầu ProxyHub — APISIX</h2></div>
+
+    <p>Tầng <b>ProxyHub</b> sử dụng <b>APISIX</b> để xử lý traffic ở mức <b>HTTP request</b>.
+      APISIX thực hiện <b>TLS termination</b>, tiếp nhận thông tin từ
+      <b>PROXY Protocol v2</b>, chuyển các thông tin cần thiết thành HTTP header tiêu chuẩn
+      và áp dụng policy riêng cho từng dịch vụ trước khi forward request tới backend.</p>
+
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Các yêu cầu đối với APISIX</h3>
+
+      <div class="tw" style="margin-top:12px;box-shadow:none">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:32%">Yêu cầu</th>
+              <th>Mô tả</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Nhận PROXY Protocol v2</b></td>
+              <td>APISIX phải hỗ trợ nhận kết nối sử dụng <b>PROXY Protocol v2</b>
+                và đọc các thông tin được truyền từ tầng phía trước, bao gồm Client IP
+                và <code class="inl">network_id</code>.</td>
+            </tr>
+
+            <tr>
+              <td><b>Chuyển PROXY-v2 thành HTTP Header</b></td>
+              <td>Thông tin trong PROXY-v2 phải được chuyển thành HTTP header tiêu chuẩn
+                trước khi forward về backend.
+                <code class="inl">network_id</code> được đưa vào
+                <code class="inl">X-Network-Id</code>, Client IP được đưa vào
+                <code class="inl">X-Client-IP</code>.
+                Backend chỉ cần xử lý HTTP header, không cần hiểu trực tiếp
+                PROXY Protocol v2.</td>
+            </tr>
+
+            <tr>
+              <td><b>Multisite — mỗi site một bộ APISIX</b></td>
+              <td>Mỗi site triển khai một bộ <b>APISIX độc lập</b>, ví dụ
+                <code class="inl">hcm-ops03</code>,
+                <code class="inl">hni-ops04</code>, nhằm tách biệt traffic
+                và giảm phạm vi ảnh hưởng khi xảy ra sự cố tại một site.</td>
+            </tr>
+
+            <tr>
+              <td><b>Giới hạn theo từng dịch vụ</b></td>
+              <td>
+                <b>VCR:</b> chỉ cho phép request tới prefix
+                <code class="inl">/kaas</code>, các path ngoài phạm vi bị từ chối.
+                <br><br>
+                <b>S3:</b> giới hạn bucket theo tenant/network; cấu hình allowlist
+                cần có syntax phù hợp để quản lý policy thông qua <b>Vault</b>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Luồng xử lý</h3>
+
+      <div class="api-flow" aria-label="Luồng xử lý qua APISIX">
+        <span class="step">VM</span><span class="arrow">→</span>
+        <span class="step">PROXY-v2</span><span class="arrow">→</span>
+        <span class="step primary">APISIX</span><span class="arrow">→</span>
+        <span class="step">Chuyển HTTP Header</span><span class="arrow">→</span>
+        <span class="step guard">Kiểm tra policy theo dịch vụ</span><span class="arrow">→</span>
+        <span class="step">Backend</span>
+      </div>
+
+      <p>APISIX thực hiện:</p>
+      <ul>
+        <li>Nhận Client IP từ PROXY Protocol v2.</li>
+        <li>Nhận <code class="inl">network_id</code> từ PROXY Protocol v2.</li>
+        <li>Chuyển các thông tin trên thành HTTP header tiêu chuẩn.</li>
+        <li>Route request theo SNI / Host tới đúng dịch vụ.</li>
+        <li>Với <b>VCR</b>, giới hạn HTTP path trong phạm vi
+          <code class="inl">/kaas</code>.</li>
+        <li>Với <b>S3</b>, kiểm tra bucket theo allowlist tương ứng với tenant/network.</li>
+        <li>Forward request hợp lệ tới backend.</li>
+      </ul>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Vai trò của ProxyHub</h3>
+
+      <p>ProxyHub/APISIX là <b>L7 Proxy / Policy Enforcement Point</b>
+        nằm trước các dịch vụ backend, thực hiện chuỗi xử lý:</p>
+
+      <div class="role-chain">
+        <span class="r">Nhận PROXY-v2</span><span class="a">→</span>
+        <span class="r">Xác định Client IP / Network ID</span><span class="a">→</span>
+        <span class="r">Chuẩn hóa HTTP Header</span><span class="a">→</span>
+        <span class="r">Kiểm tra path / bucket</span><span class="a">→</span>
+        <span class="r">Forward tới backend</span>
+      </div>
+
+      <p style="margin-top:16px;margin-bottom:8px">Các policy áp dụng dựa trên:</p>
+
+      <div class="api-flow" style="margin:8px 0 0">
+        <span class="step"><code class="inl">network_id</code></span>
+        <span class="step">Client IP</span>
+        <span class="step">SNI / Host</span>
+        <span class="step">HTTP path</span>
+        <span class="step">S3 bucket</span>
+      </div>
+
+      <p style="margin-top:14px;margin-bottom:0">
+        ProxyHub tập trung vào <b>chuẩn hóa thông tin nguồn request, routing
+        và giới hạn phạm vi request theo từng dịch vụ</b> trước khi traffic
+        được chuyển tới VCR, S3, MaaS hoặc các dịch vụ private gateway khác.
+      </p>
+    </div>
+  </section>
+
+  <div class="foot">
+    <p><b>Tóm tắt một dòng:</b> VM → <span class="mono">169.254.169.254:443</span> (HAProxy passthrough + gắn network_id) → unix socket (send-proxy-v2) → socat trong <b>container macvlan không quyền admin</b> trên <span class="mono">vlan.180</span> (đích cố định) → proxyhub riêng tư <span class="mono">172.26.8.30:8443</span> (bóc network_id, soi request, egress ra <b>dịch vụ public</b> VCR/S3/MAAS). Hai tầng đầu <b>vận chuyển + gán danh tính</b>; proxyhub là <b>điểm kiểm soát ra public duy nhất</b> và là nơi phân quyền thật.</p>
+  </div>
+
+</div>
