@@ -1,4 +1,0 @@
-services:
-  - id: "service-upstream-vcr"
-    name: "vcr"
-    upstream_id: "upstream-vcr"
