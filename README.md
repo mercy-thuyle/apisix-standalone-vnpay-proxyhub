@@ -30,7 +30,6 @@
 │                                                   hoặc combo systemd watcher theo dõi + tự động restart docker container)
 │
 ├── apisix_routes/                                ← thư mục gốc chứa fragment, merge thành apisix-proxyhub.yaml bởi merge-fragments.sh
-│   │
 │   ├── global_rules/                             ← guard + chuẩn hoá header, áp cho MỌI route, FLAT
 │   │   └── <rule-id>.yaml                        ← 1 file = 1+ global_rule, key bắt buộc: "global_rules:"
 │   │                                                vd: global-network-identity.yaml (X-Network-Id/X-Client-IP
