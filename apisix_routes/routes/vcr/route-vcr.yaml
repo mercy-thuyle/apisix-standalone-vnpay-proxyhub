@@ -5,7 +5,7 @@ routes:
     status: 1
     service_id: "service-upstream-vcr"
     # plugin_config_id: "plugin-config-s3-bucket-guard"
-    uri:
+    uris:
       - "/*"
       # - "/kaas"
       # - "/kaas/*"
