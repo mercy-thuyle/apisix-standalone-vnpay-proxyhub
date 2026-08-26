@@ -1,5 +1,5 @@
 routes:
-  # ── Hyperstore Cloudian S3 HCM ──
+  # ── MAAS ──
   - id: "route-maas"
     name: "maas"
     status: 1
@@ -7,8 +7,8 @@ routes:
     # plugin_config_id: "plugin-config-s3-bucket-guard"
     uri: "/*"
     hosts:
-      - "maas.sds.infiniband.vn"
-      - "*.maas.sds.infiniband.vn"
+      - "maas.infiniband.vn"
+      - "*.maas.infiniband.vn"
     # vars:
     #   - ["scheme", "==", "http"]
     #   - ["remote_addr", "!=", "172.26.29.231"]

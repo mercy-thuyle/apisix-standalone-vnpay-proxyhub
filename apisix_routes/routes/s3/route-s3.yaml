@@ -1,5 +1,5 @@
 routes:
-  # ── Hyperstore Cloudian S3 HCM ──
+  # ── S3 ──
   - id: "route-s3"
     name: "s3"
     status: 1
