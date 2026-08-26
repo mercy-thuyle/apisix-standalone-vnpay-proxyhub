@@ -7,8 +7,8 @@ routes:
     # plugin_config_id: "plugin-config-s3-bucket-guard"
     uri: "/*"
     hosts:
-      - "s3-hcm.sds.infiniband.vn"
-      - "*.s3-hcm.sds.infiniband.vn"
+      - "maas.sds.infiniband.vn"
+      - "*.maas.sds.infiniband.vn"
     # vars:
     #   - ["scheme", "==", "http"]
     #   - ["remote_addr", "!=", "172.26.29.231"]
