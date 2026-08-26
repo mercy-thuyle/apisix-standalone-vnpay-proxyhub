@@ -1,33 +1,31 @@
 routes:
-  # ── Hyperstore Cloudian S3 HCM ──
+  # ── VCR ──
   - id: "route-vcr"
     name: "vcr"
     status: 1
     service_id: "service-upstream-vcr"
     # plugin_config_id: "plugin-config-s3-bucket-guard"
-    uri: "/*"
+    uri:
+      - "/*"
+      # - "/kaas"
+      # - "/kaas/*"
     hosts:
-      - "vcr.sds.infiniband.vn"
-      - "*.vcr.sds.infiniband.vn"
+      - "vcr.infiniband.vn"
+      - "*.vcr.infiniband.vn"
     # vars:
     #   - ["scheme", "==", "http"]
-    #   - ["remote_addr", "!=", "172.26.29.231"]
 
-    # plugins:
-
-    #   custom.s3-normalizer-bucket-name:
-    #     path_hosts:
-    #       - "s3-hcm.sds.infiniband.vn"
-    #     vhost_domains:
-    #       - "s3%-hcm%.sds%.infiniband%.vn"
-
-    #   custom.s3-accesskey-extractor:
-    #     set_header: "X-S3-Access-Key"
-    #     anonymous_use_ip: true
-
-    #   custom.s3-qos-consumer: {}
-
-    #   custom.s3-traffic-classifier: {}
+    plugins:
+      # Giới hạn cứng path trong /kaas (spec mục 06.3) — block_rules match theo
+      # ctx.var.request_uri (đã normalize từ APISIX >= 2.10.2, fix CVE-2021-43557,
+      # bản 3.17.0 đang dùng không bị ảnh hưởng). Lookahead phủ định: match (=> block)
+      # MỌI uri KHÔNG bắt đầu đúng "/kaas" + ("/" | "?" | hết chuỗi) — 3 điều kiện
+      # kết thúc để không chặn nhầm "/kaas" trần và "/kaas?x=1" (query string).
+      uri-blocker:
+        block_rules:
+          - "^(?!/kaas([/?]|$))"
+        rejected_code: 403
+        rejected_msg: "Your path not allowed on VCR route, only /kaas is served."
 
     timeout:
       connect: 60
