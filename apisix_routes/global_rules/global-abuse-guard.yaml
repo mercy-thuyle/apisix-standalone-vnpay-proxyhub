@@ -26,7 +26,13 @@ global_rules:
         allow_degradation: true
         policy: local
 
-
+      # ⚠️ CHỈ 1 serverless-pre-function được phép hiệu lực trong TOÀN BỘ
+      # global_rules — APISIX loại bỏ khỏi execution list (silent, chỉ log
+      # warn "Removing it from execution list") nếu có >1 global_rule cùng
+      # khai plugin này, KHÔNG merge/chạy cả hai. Đã xảy ra thật khi tách
+      # riêng global-network-identity.yaml — cả 2 logic (X-Node-Id VÀ
+      # X-Network-Id) đều bị vô hiệu hoá cùng lúc, không có exception nào.
+      # → Mọi logic serverless-pre-function cấp global PHẢI gộp chung 1 file.
       serverless-pre-function:
         phase: rewrite
         functions:
@@ -45,4 +51,18 @@ global_rules:
               -- Chỉ có giá trị khi route dùng key-auth/jwt-auth (consumer_groups); S3 SDK ký
               -- SigV4 thì ctx.consumer là nil → fallback "-".
               ngx.req.set_header("X-Consumer", ctx.consumer and ctx.consumer.username or "-")
+
+              -- network_id chỉ tồn tại trong TLV unique_id (0x05) của PROXY-v2, do HAProxy
+              -- gán tại tầng ovnmeta-<netid> (unique-id-format <network_id>) trước khi vào
+              -- unix socket. KHÔNG lấy từ $remote_addr — sau real_ip_header=proxy_protocol,
+              -- $remote_addr chỉ còn là client IP gốc của VM, không mang network_id.
+              local network_id = ngx.var.proxy_protocol_tlv_unique_id
+              if not network_id or network_id == "" then
+                -- Không có TLV nghĩa là kết nối không qua đúng đường HAProxy/socat như thiết kế
+                -- (vd test tay, hoặc lỗi tầng trước) — chặn thẳng, không forward mù backend.
+                return ngx.exit(403)
+              end
+
+              ngx.req.set_header("X-Network-Id", network_id)
+              ngx.req.set_header("X-Client-IP", ngx.var.remote_addr)
             end
