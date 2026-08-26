@@ -213,8 +213,8 @@ plugins:
   # - key-auth
   # - lago
   # - ldap-auth
-  # - limit-conn
-  # - limit-count
+  - limit-conn
+  - limit-count
   # - limit-req
   - log-rotate
   # - loggly
