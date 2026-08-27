@@ -33,7 +33,8 @@ secret_providers:
     provider: vault
     uri: "${{VAULT_ADDR}}"
     kv: "cloud/profile"
-    prefix: "app/apisix/certs"
+    # prefix: "app/apisix-proxyhub/certs"
+    prefix: "cloud/profile"
     token: "${{VAULT_TOKEN}}"
 
 deployment:
