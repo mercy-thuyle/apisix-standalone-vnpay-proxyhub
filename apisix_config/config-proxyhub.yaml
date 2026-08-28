@@ -256,7 +256,7 @@ plugins:
   # - zipkin
   - custom.log-level
   - custom.s3-network-bucket-guard
-  # - custom.test-header-capture
+  - custom.test-header-capture
 
 # stream_plugins:
 #   - ip-restriction

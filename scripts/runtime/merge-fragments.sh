@@ -185,10 +185,7 @@ validate_block_dir "secrets" "1"
 validate_block_dir "consumer_groups" "1"
 validate_block_dir "consumers" "2"
 
-# Metadata có thể thuộc built-in logger hoặc custom plugin. Giữ allowlist để
-# bắt typo silent no-op, đồng thời khai đúng các custom ID hiện được load bởi
-# config-proxyhub.yaml; nếu thêm custom plugin mới thì thêm ID tương ứng ở đây.
-KNOWN_PLUGIN_METADATA_IDS="http-logger kafka-logger tcp-logger udp-logger clickhouse-logger elasticsearch-logger loki-logger loggly splunk-hec-logging rocketmq-logger sls-logger skywalking-logger google-cloud-logging datadog opentelemetry custom.log-level custom.s3-traffic-classifier"
+KNOWN_PLUGIN_METADATA_IDS="http-logger kafka-logger tcp-logger udp-logger clickhouse-logger elasticsearch-logger loki-logger loggly splunk-hec-logging rocketmq-logger sls-logger skywalking-logger google-cloud-logging datadog opentelemetry"
 PM_DIR="${ROUTES_SRC}/plugin_metadata"
 if [ -d "${PM_DIR}" ]; then
   glob_yaml_files "${PM_DIR}" "1" | while IFS= read -r f; do
@@ -204,7 +201,7 @@ if [ -d "${PM_DIR}" ]; then
         [ "${pm_id}" = "${k}" ] && MATCH=1 && break
       done
       if [ "${MATCH}" -eq 0 ]; then
-        log_warn "plugin_metadata id '${pm_id}' trong $(basename "${f}") không khớp allowlist plugin đã biết (${KNOWN_PLUGIN_METADATA_IDS}) — kiểm tra lại đúng tên plugin thật chưa, nếu không plugin sẽ KHÔNG đọc được metadata này (silent no-op). Nếu đây là plugin hợp lệ ngoài danh sách, thêm vào KNOWN_PLUGIN_METADATA_IDS."
+        log_warn "plugin_metadata id '${pm_id}' trong $(basename "${f}") không khớp allowlist plugin logger đã biết (${KNOWN_PLUGIN_METADATA_IDS}) — kiểm tra lại đúng tên plugin thật chưa (vd 'kafka-logger'), nếu không plugin sẽ KHÔNG đọc được metadata này (silent no-op). Nếu đây là plugin hợp lệ ngoài danh sách, thêm vào KNOWN_PLUGIN_METADATA_IDS."
       fi
     done
   done
@@ -316,12 +313,9 @@ fi
 cp "${TMP_OUTPUT}" "${OUTPUT}"
 rm -f "${TMP_OUTPUT}"
 
-# Copy output → samples/runtime/ để admin review trên host. Dry-run/CI chỉ cần
-# artifact đích, không được ghi vào working tree (đặc biệt khi source mount :ro).
+# Copy output → samples/runtime/ để admin review trên host
 SAMPLES_DIR="$(dirname "${ROUTES_SRC}")/samples/runtime"
-if [ "${SKIP_SAMPLE_UPDATE:-0}" = "1" ]; then
-  log_info "Sample update skipped (SKIP_SAMPLE_UPDATE=1)"
-elif [ -d "${SAMPLES_DIR}" ]; then
+if [ -d "${SAMPLES_DIR}" ]; then
   cp "${OUTPUT}" "${SAMPLES_DIR}/apisix-${DC_PROFILE}.yaml"
   log_info "Sample updated → samples/runtime/apisix-${DC_PROFILE}.yaml"
 fi

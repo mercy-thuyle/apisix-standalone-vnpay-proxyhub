@@ -11,12 +11,12 @@ plugin_configs:
         fail_open: false
         reject_code: 403
 
-      ip-restriction:
-        # blacklist: []
-        blacklist:
-          - "198.51.100.44"
-          # - "999.999.999.999"
-          # - "198.51.100.44
+      # ip-restriction:
+      #   # blacklist: []
+      #   blacklist:
+      #     - "198.51.100.44"
+      #     # - "999.999.999.999"
+      #     # - "198.51.100.44
 
-      custom.test-header-capture:
-        header_name: "X-Dry-Run-Test"
+      # custom.test-header-capture:
+      #   header_name: "X-Dry-Run-Test"
