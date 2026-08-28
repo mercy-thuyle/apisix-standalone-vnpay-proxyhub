@@ -4,9 +4,11 @@
 > (`apisix/proxyhub.git`, tách hoàn toàn khỏi `apisix-standalone` S3-storage).
 > Theo đúng spec `link-local-gateway-flow-final-end.html` mục 06.
 >
-> Cập nhật gần nhất: 26/08/2026 — mục 1-6 đã hoàn thành phần kiến trúc/logic
-> (mục 1-5 test thật, mục 6 đánh giá qua cấu trúc repo); còn lại backlog input
-> bên ngoài (domain/upstream VCR-MAAS thật, Kafka topic, xác nhận VCR host).
+> Cập nhật gần nhất: 27/08/2026 — mục 1-6 đã hoàn thành phần kiến trúc/logic
+> (mục 1-5 test thật, mục 6 đánh giá qua cấu trúc repo); cert qua
+> `$secret://vault/...` (mục 2.6) đã test thật, thay thế kết luận cũ ở tồn
+> đọng #6; còn lại backlog input bên ngoài (domain/upstream VCR-MAAS thật,
+> Kafka topic, xác nhận VCR host).
 
 ---
 
@@ -161,7 +163,7 @@ ngx.req.set_header("X-Client-IP", ngx.var.remote_addr)
 
 ### 2.3 Mục 4 — S3 bucket allowlist qua Vault
 
-**Kiến trúc:** custom plugin `s3-network-bucket-guard.lua` đọc `X-Network-Id` → tách bucket từ Host (virtual-hosted-style) hoặc URI (path-style) → gọi Vault KV v2 qua `vault-kv-client.lua` (dùng `resty.http`, **không** qua cơ chế `secret_providers`/`$secret://` built-in của APISIX — cơ chế đó chỉ resolve giá trị tĩnh lúc load config, không lookup động theo key runtime được) → cache `lua_shared_dict` (TTL 60s) → so khớp `buckets` allowlist → allow/deny.
+**Kiến trúc:** custom plugin `s3-network-bucket-guard.lua` đọc `X-Network-Id` → tách bucket từ Host (virtual-hosted-style) hoặc URI (path-style) → gọi Vault KV v2 qua `vault-kv-client.lua` (dùng `resty.http` trực tiếp trong access phase, **không** qua cơ chế `secrets`/`$secret://` built-in của APISIX — lý do KHÔNG phải "chỉ resolve tĩnh lúc load config", đó là hiểu sai đã đính chính ở mục 2.6; lý do thật: plugin cần lookup theo `network_id` tính toán lúc request, còn `$secret://` chỉ resolve theo field cấu hình cố định khai sẵn trong route/ssl/consumer, không hợp cho lookup động theo giá trị runtime) → cache `lua_shared_dict` (TTL 60s) → so khớp `buckets` allowlist → allow/deny.
 
 **Vault path:** `cloud/profile/app/apisix-proxyhub/network-buckets/<network_id>` — namespace riêng (`app/apisix-proxyhub/*`), tách khỏi `app/apisix/*` của cụm S3-storage. Value format:
 ```json
@@ -218,7 +220,73 @@ Regex dùng lookahead phủ định: match (⇒ block) MỌI uri **không** bắ
 | `/kaas` | `404` (từ Cloudian, `upstream_status: 404`, redirect `/s3/login.htm`) | Pass qua `uri-blocker`, tới đúng backend tạm — xem 2.4 |
 | `/other-path` | `403`, body `{"error_msg":"Your path not allowed on VCR route, only /kaas is served."}` | Log xác nhận `uri-blocker exits with http status code 403` |
 
-**Lưu ý vận hành:** phải test qua `test-proxy-v2.py` (giả lập PROXY-v2 + TLV `network_id`), **không dùng curl trần trực tiếp**. Curl trần bị `global-abuse-guard` (global rule, phase `rewrite`, chạy trước `access` — phase của `uri-blocker`) chặn `403` sớm vì thiếu TLV `unique_id`, response là trang lỗi HTML generic của APISIX — dễ nhầm là `uri-blocker` đang chặn trong khi thực ra request chưa bao giờ chạm tới nó.
+**Lưu ý vận hành:** phải test qua `test-proxy-v2.py` (giả lập PROXY-v2 + TLV `network_id`), **không dùng curl trần trực tiếp**. Curl trần bị `global-abuse-guard` (global rule, phase `rewrite`, chạy trước `access` — phase của `uri-blocker`) chặn `403` sớm vì thiếu TLV `unique_id`, response là trang lỗi HTML generic của APISIX — dễ nhầm là `uri-blocker` đang chặn trong khi thực ra request chưa bao giờ chạm tới nó. Cùng lý do này áp dụng cho test cert ở mục 2.6 — curl trần vào port 443 vẫn bị chặn 403 ở đúng chỗ này, không phải lỗi cert.
+
+### 2.6 Cert qua `$secret://vault/...` (secret_providers) — ĐÃ TEST THẬT, đính chính kết luận cũ ở tồn đọng #6
+
+**Đính chính quan trọng:** tồn đọng #6 (bản cũ) ghi *"cơ chế `secret_providers` đã xác nhận có bug ở cụm S3-storage, quyết định không dùng lại cho ProxyHub"* — **sai**. Bug `PEM_read_bio_X509_AUX() failed` không phải do APISIX/version, mà do đặt cấu hình **sai file + sai tên key** ngay từ đầu (chi tiết root cause ở bug #3.12). Sau khi sửa đúng vị trí, cơ chế native hoạt động bình thường trên APISIX 3.17.0, đã test thật trên `sds.infiniband.vn` (27/08/2026).
+
+**Vị trí đúng — khác hẳn giả định ban đầu:**
+- Khối `secrets:` phải nằm trong **file dynamic resources** (`apisix_routes/`, được `merge-fragments.sh` gộp vào `apisix-proxyhub.yaml`) — **KHÔNG** phải `config.yaml` (`apisix_config/config-proxyhub.yaml`). Dẫn chứng: doc chính thức Apache APISIX (`docs/en/latest/terminology/secret.md`, mục Standalone mode) + source `apisix/core/config_yaml.lua` dòng 491-494 (`core.config.new("/secrets",...)` strip `/` → đọc key `apisix_yaml["secrets"]`, dòng 228).
+- Top-level key đúng là **`secrets:`** (số nhiều) — không phải `secret_providers:`.
+- Mỗi item không có field `provider:` riêng — **manager type nằm trong chính `id:`**, format `<manager>/<confid>` (vd `vault/vault-provider`) — APISIX tách theo dấu `/` đầu tiên để chọn module `apisix.secret.<manager>`.
+- `merge-fragments.sh` gốc **không hỗ trợ** resource type `secrets` (`VALID_KEYS` thiếu) — phải thêm thủ công (patch đã áp dụng, xem `scripts/runtime/merge-fragments.sh`).
+
+**File thật, `apisix_routes/secrets/vault-provider.yaml`:**
+```yaml
+secrets:
+  - id: "vault/vault-provider"
+    uri: "${{VAULT_ADDR}}"
+    prefix: "cloud/profile"
+    token: "${{VAULT_TOKEN}}"
+```
+
+**`prefix` chỉ được là MOUNT thôi** (`cloud/profile`), không phải cả path — vì patch [3/5] (`1-patch-template-lua.sh`, sửa `vault.lua` hỗ trợ KV v2) chèn `/data/` ngay sau `conf.prefix`, đúng chuẩn Vault KV v2 (`<mount>/data/<path>`) chỉ khi `prefix` dừng đúng ở mount. Phần path còn lại (`app/apisix-proxyhub/certs`) nằm trong chính URI `$secret://`:
+```yaml
+cert: "$secret://vault/vault-provider/app/apisix-proxyhub/certs/<domain>/cert"
+key:  "$secret://vault/vault-provider/app/apisix-proxyhub/certs/<domain>/key"
+```
+(format chuẩn `$secret://$manager/$id/$secret_name/$key` theo doc — `secret_name` ở đây gồm cả path prefix + domain, `key` là field `cert`/`key` trong secret JSON).
+
+**Call chain thật đã trace qua source (APISIX 3.17.0), xác nhận resolve TRONG `ssl_phase` — không phải "resolve tĩnh lúc load":**
+```
+apisix/init.lua:182-190 ssl_phase()  (bind vào nginx ssl_certificate_by_lua_block)
+  → router.router_ssl.set()
+apisix/ssl/router/radixtree_sni.lua:246
+  → secret.fetch_secrets(matched_ssl.value, true)  -- có cache, lrucache TTL mặc định 300s
+  → dispatch qua apisix/secret.lua → apisix/secret/vault.lua (đã patch KV v2)
+```
+Vault trả lỗi/prefix sai/id sai → `fetch()` fallback về CHÍNH CHUỖI LITERAL `$secret://...` chưa resolve → chuỗi đó bị đưa thẳng vào `ngx_ssl.parse_pem_cert()` → chính là nguồn gốc `PEM_read_bio_X509_AUX() failed` (parse 1 chuỗi không phải PEM).
+
+**Test thật đã pass** (27/08/2026, `sds.infiniband.vn`):
+```
+$ echo | openssl s_client -connect 127.0.0.1:443 -servername sds.infiniband.vn 2>/dev/null | openssl x509 -noout -subject -dates
+subject=CN = *.sds.infiniband.vn
+notAfter=Sep 30 08:20:23 2026 GMT
+```
+Khớp đúng cert version 2 vừa push lên Vault (không phải cache cũ) — TLSv1.3 handshake OK, không còn `PEM_read_bio`.
+
+**Nhận định quan trọng — đã áp dụng (27/08/2026):** vì `$secret://vault/...` tự resolve **mỗi lần APISIX cần** (cache nội bộ riêng của APISIX — `apisix/secret.lua`, `secrets_cache`; đã đo thật: refresh tự động trong khoảng 60s–300s tuỳ trạng thái cache trước đó, xem mục 2.7), 4 domain đang dùng cơ chế này **không còn phụ thuộc** việc fetch-về-đĩa-rồi-inject để nhận cert mới nữa. Đã **xoá hẳn** `scripts/deploy/3-fetch-certs-from-vault.sh` và `scripts/deploy/4-watch-certs-vault.sh` (không comment, không giữ lại) — 2 script này chỉ tồn tại đúng 1 buổi làm việc trước khi bị chứng minh dư thừa. Renew cert giờ chỉ còn 1 việc: chạy `push-cert-to-vault.sh` từ máy local admin — APISIX tự nhận trong ≤5 phút, không cần chạm gì tới VM.
+
+### 2.7 Refresh timing thật — đo bằng cách cố ý bơm cert hỏng lên Vault (27/08/2026)
+
+**Test:** ghi thẳng 1 chuỗi không phải PEM vào field `cert` trên Vault (qua `curl` trực tiếp, KHÔNG qua `push-cert-to-vault.sh` — script đó tự validate `openssl x509 -noout` nên sẽ chặn chuỗi hỏng, đúng thiết kế) cho `sds.infiniband.vn`, rồi đợi và theo dõi log.
+
+**Kết quả đo thật:**
+```
+Vault ghi version mới:  2026-08-27T09:56:38.42Z (UTC)
+APISIX báo PEM_read_bio_X509_AUX() failed: 2026/08/27 16:57:38 (UTC+7 = 09:57:38 UTC)
+→ khoảng cách thật: ~60 giây — KHÔNG PHẢI ~300s
+```
+
+**Nguyên nhân — đọc đúng source `secret.lua` THẬT trong container** (không tin bản GitHub tải về, dù cùng tag — luôn ưu tiên đọc trực tiếp trong image đang chạy):
+```lua
+local ttl = ... or 300        -- cache khi fetch THÀNH CÔNG
+local neg_ttl = ... or 60     -- cache khi fetch THẤT BẠI ("1 minute default for failures")
+```
+Có 2 TTL khác nhau, không phải 1 con số cố định. Kết luận thực dụng: **refresh tự động, không cần restart, trong cửa sổ tối đa 300s** (có thể nhanh hơn tới 60s tuỳ trạng thái cache trước đó) — không có kịch bản nào cần thao tác thủ công trên VM để nhận cert mới.
+
+**Sau test:** đã phục hồi cert đúng qua `push-cert-to-vault.sh` — không có downtime kéo dài ngoài đúng cửa sổ test có chủ đích.
 
 ---
 
@@ -294,7 +362,30 @@ Test `sys/capabilities-self` trên `app/apisix-proxyhub` (không có gì theo sa
 
 **Fix:** tạo lại đúng path đầy đủ `app/apisix-proxyhub/network-buckets/test-network-id`, JSON toggle bật, value `{"buckets": [...]}`.
 
-### 3.11 `route-vcr.yaml` — field `uri` khai sai kiểu (list thay vì string) → APISIX reject cả route
+### 3.12 `secret_providers` — đặt sai file (`config.yaml`) + sai tên key → `/secrets` luôn rỗng, không hề liên quan version/ssl_phase
+
+**Triệu chứng:** `ssl_phase(): failed to fetch ssl config: failed to parse PEM cert: PEM_read_bio_X509_AUX() failed` — y hệt bug từng ghi nhận ở cụm S3-storage, ban đầu tưởng là hạn chế của cơ chế `secret_providers`/version APISIX (xem tồn đọng #6 bản cũ).
+
+**Root cause thật (trace source + đối chiếu doc chính thức, xem mục 2.6):** khối cấu hình được đặt tên `secret_providers:` trong `apisix_config/config-proxyhub.yaml` (`config.yaml`, static settings) — nhưng APISIX Standalone chỉ đọc cơ chế Secret từ top-level key **`secrets:`** (số nhiều) trong file **dynamic resources** (`apisix.yaml`, tức `apisix-proxyhub.yaml` do `merge-fragments.sh` gộp ra). `config.yaml` không hề được `config_yaml.lua` xử lý cho mục đích này. Kết quả: `/secrets` (config object nội bộ) luôn rỗng → mọi `$secret://vault/...` không resolve được → APISIX fallback lấy **chính chuỗi literal** làm giá trị field → chuỗi đó (không phải PEM) bị đưa thẳng vào `ngx_ssl.parse_pem_cert()` → `PEM_read_bio_X509_AUX() failed`.
+
+**Fix:**
+1. Xoá hẳn khối `secret_providers:` khỏi `config-proxyhub.yaml`.
+2. Tạo `apisix_routes/secrets/vault-provider.yaml` (top-level key `secrets:`, field `id: "vault/vault-provider"` — gộp `manager/confid`, không có field `provider:` riêng).
+3. Thêm `secrets` vào `VALID_KEYS`/`validate_block_dir`/`append_block` của `merge-fragments.sh` (resource type mới, trước đó chưa được hỗ trợ).
+
+**Bài học:** khi 1 cơ chế "không hoạt động" đúng như tài liệu mô tả, ưu tiên nghi ngờ **vị trí/format cấu hình** trước khi kết luận đó là hạn chế/bug của bản thân tool — nhất là với hệ thống có 2 file cấu hình tách biệt rõ ràng (static vs dynamic) như APISIX Standalone.
+
+### 3.13 `inject-certs.sh` — comment `#` không đủ để "tắt" placeholder cũ, phải xoá hẳn
+
+**Triệu chứng:** gitsync exechook lặp lỗi mỗi 5s: `injected=8 missing=0 remaining=8`, `FATAL: ABORT` — dù khối `cert: |`/`key: |` cũ đã được comment bằng `#` khi chuyển 4 domain sang `$secret://vault/...`.
+
+**Root cause:** `inject-certs.sh` dùng `grep -qF "<PASTE_CONTENT_OF_...>"` (chuỗi thuần, không hiểu comment YAML) để phát hiện domain cần inject — dòng `#   <PASTE_CONTENT_OF_...>` vẫn khớp. Bước thay thế thật (`sed "s|      ${PLACEHOLDER}|...|"`) yêu cầu đúng 6-space-prefix không có `#` nên **không khớp được dòng đã comment** → không thay được gì, nhưng script vẫn báo `✓` (không kiểm tra `sed` có thật sự thay hay không) → cuối cùng đếm lại `REMAINING` bằng đúng kiểu `grep` chuỗi thuần đó, vẫn thấy còn → `ABORT`.
+
+**Fix:** xoá hẳn khối `cert: |`/`key: |` + placeholder cũ khỏi `ssl-*.yaml` cho domain đã chuyển sang `$secret://vault/...` — không dùng comment giữ lại như phương án rollback nhanh (không tương thích với cách `inject-certs.sh` đếm remaining).
+
+**Bài học:** `inject-certs.sh` không phân biệt được YAML comment — mọi thao tác "tắt tạm" khối có chứa chuỗi `PASTE_CONTENT_OF_` phải xoá hẳn, không comment.
+
+### 3.14 `route-vcr.yaml` — field `uri` khai sai kiểu (list thay vì string) → APISIX reject cả route
 
 **Triệu chứng:** sau khi thêm `uri-blocker`, gitsync hot-reload xong nhưng route `route-vcr` không hoạt động — cả `/kaas` lẫn path khác đều không route đúng, log lặp mỗi lần reload:
 ```
@@ -331,7 +422,7 @@ Field `uri` (số ít) trong schema APISIX **bắt buộc là string**, không c
 | 3 | Xác nhận với team VCR: `*.vcr.infiniband.vn` (wildcard subdomain) có cần giữ không, hay VCR (registry) chỉ route theo path chuẩn Docker Registry API v2 (không có khái niệm subdomain-per-tenant như S3) — nghi vấn leftover copy-paste từ template S3 (cùng dạng bug #3.7) | Trung bình | Xem mục 2.4 |
 | 4 | Kafka logger lỗi liên tục `not found topic, topic: apisix-proxyhub` (topic name thật đã đổi từ `apisix-gateway-${{DC_PROFILE}}` sang `apisix-${{DC_PROFILE}}` — note cũ ghi sai tên topic) | Trung bình | Không chặn traffic, nhưng cần tạo topic `apisix-proxyhub` (Strimzi `KafkaTopic` CR) hoặc tắt `kafka-logger` tạm thời — xác nhận ai sở hữu (đội Kafka hay Mercy tự tạo) |
 | 5 | `X-Forwarded-Port` patch (`ngx_tpl.lua`/`init.lua`) — quyết định để mở, cần xác nhận lại khi chốt route S3 backend qua cụm S3-storage (khả năng cao cần áp lại vì thêm 1 hop gateway) | Trung bình | Xem note-kỹ-thuật-apisix.md (cụm S3) |
-| 6 | Chuyển cert fetch trong `3-decrypt-certs.sh` từ decrypt AES-passphrase (`CERT_PASSPHRASE`) sang lấy trực tiếp từ Vault KV (`vault kv get -field=cert/key`) — khối lệnh đã có sẵn dạng comment ngay trong script, chỉ cần bật + xác nhận Vault mount/path cho cert (namespace khác `network-buckets` của mục 4). Luồng sau đó giữ nguyên (`./certs/<domain>.{cert,key}` → `inject-certs.sh` sed vào placeholder) | Trung bình | **Không** phải cơ chế `secret_providers`/`$secret://vault/...` native của APISIX — cơ chế đó đã xác nhận có bug (`PEM_read_bio_X509_AUX() failed`, `vault.lua` không được gọi trong `ssl_phase`) ở cụm S3-storage, quyết định không dùng lại cho ProxyHub |
+| 6 | ✅ **Đã xong, khác hướng ban đầu** — cơ chế `secrets`/`$secret://vault/...` native của APISIX **đã xác nhận CHẠY ĐÚNG** trên 3.17.0 (mục 2.6), bug cũ là do đặt sai file/sai key (bug #3.12), không phải hạn chế thật của cơ chế. 4/4 domain (`infiniband.vn`, `sds.infiniband.vn`, `s3-hcm.sds.infiniband.vn`, `s3-hni.sds.infiniband.vn`) dùng `$secret://vault/...` làm cơ chế chính. Từng dựng 2 script fetch-về-đĩa (`3-fetch-certs-from-vault.sh`, `4-watch-certs-vault.sh`) trước khi cơ chế native được xác nhận hoạt động — đã **xoá hẳn cả 2**, dư thừa hoàn toàn vì APISIX tự resolve trực tiếp từ Vault. Chỉ còn `push-cert-to-vault.sh` (seed/renew) | — | Xem mục 2.6/2.7 + bug #3.12/#3.13. Luồng AES (`3-decrypt-certs.sh`) giữ nguyên làm fallback, không xoá |
 | 7 | `access_log_format` field `"akid"` vẫn map `$http_x_s3_access_key` (khái niệm SigV4 cũ, không áp dụng ProxyHub) | Thấp | Cosmetic |
 | 8 | README repo GitLab còn nội dung Ceph/S3-generic lẫn trong bảng "Plugin list tối ưu" — không phản ánh đúng plugin thật đang chạy | Thấp | Đã note, chờ tinh chỉnh sau |
 | 9 | `scripts/libraries/decrypt-cert-helper.sh` + `cert-list-domains.txt` — chưa đổi domain list sang FQDN VCR/S3/MAAS thật; xác nhận cert `*.infiniband.vn` (dùng cho VCR/MAAS) và `*.sds.infiniband.vn` (dùng cho S3) đã inject đúng file, không lẫn | Thấp | |
@@ -392,3 +483,19 @@ grep -n '── src:' apisix_routes/apisix-proxyhub.yaml    # liệt kê toàn b
 ```bash
 sh scripts/runtime/merge-fragments.sh apisix_routes /tmp/test-output.yaml 2>&1 | tail -10
 ```
+
+### 5.7 Cert qua Vault — 3 script, chạy ở 2 nơi khác nhau, không phụ thuộc nhau lẫn luồng AES cũ
+
+| Script | Chạy ở đâu | Khi nào |
+|---|---|---|
+| `push-cert-to-vault.sh` | Máy local admin (không phải VM APISIX, không đọc `.env` repo) | Seed lần đầu / renew cert thủ công — đẩy `<domain>.cert-bundle`(hoặc `.cert`)+`.key` lên Vault KV v2. Có `--verify-only` (read-only) và không truyền `--prefix` thì chạy hết `KNOWN_VAULT_PREFIXES` khai trong script |
+
+**Đã xoá** (27/08/2026): `scripts/deploy/3-fetch-certs-from-vault.sh` và `scripts/deploy/4-watch-certs-vault.sh` — dựng ra trước khi xác nhận `$secret://vault/...` chạy đúng trên 3.17.0, sau khi xác nhận thì dư thừa hoàn toàn (APISIX tự fetch trực tiếp từ Vault mỗi lần cần, không cần script trung gian ghi ra `./certs/` rồi `inject-certs.sh` nữa). Domain nào còn dùng luồng AES tĩnh (`cert: |` placeholder) thì vẫn dùng `3-decrypt-certs.sh` như cũ.
+
+**Verify cert đang phục vụ thật (không qua trung gian, đọc thẳng từ TLS handshake):**
+```bash
+echo | openssl s_client -connect 127.0.0.1:443 -servername <domain> 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+**Test đúng route/policy (không chỉ TLS)** phải qua `test-proxy-v2.py` (mục 5.1) — curl trần bị `global-abuse-guard` chặn 403 do thiếu TLV `unique_id`, xem mục 2.5/2.6.
