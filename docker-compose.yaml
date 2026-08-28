@@ -49,7 +49,8 @@ services:
       GITSYNC_ROOT: "/tmp/sync"
       GITSYNC_LINK: "current"
       GITSYNC_PERIOD: "30s"
-      GITSYNC_EXECHOOK_TIMEOUT: "10s"
+      # ADC có thể boot APISIX dry-run; hook phải dài hơn ADC_TIMEOUT (90s).
+      GITSYNC_EXECHOOK_TIMEOUT: "120s"
       GITSYNC_EXECHOOK_BACKOFF: "5s"
       GITSYNC_DEPTH: "1"
       GITSYNC_ADD_USER: "true"
