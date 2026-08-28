@@ -1,6 +1,6 @@
 # Kiến trúc thư mục tại local mỗi DC
 ```
-/opt/apisix/standalone/sandbox/
+/opt/apisix/apisix-standalone/
 │
 ├── gitsync/                                      ← GITSYNC_ROOT, 65533 tự quản, KHÔNG touch
 │   ├── .git

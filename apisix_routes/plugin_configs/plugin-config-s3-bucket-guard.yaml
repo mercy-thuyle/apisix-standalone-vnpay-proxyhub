@@ -10,3 +10,13 @@ plugin_configs:
         cache_ttl: 60
         fail_open: false
         reject_code: 403
+
+      ip-restriction:
+        # blacklist: []
+        blacklist:
+          - "198.51.100.44"
+          # - "999.999.999.999"
+          # - "198.51.100.44
+
+      custom.test-header-capture:
+        header_name: "X-Dry-Run-Test"

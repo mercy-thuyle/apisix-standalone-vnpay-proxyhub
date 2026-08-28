@@ -5,9 +5,13 @@
 # Nguyên tắc mỗi bước trong script: EXPLAIN (đang test service/route/logic nào, vì sao)
 # -> RUN -> RESULT (kết quả kèm next-step cụ thể nếu OK/WARN/FAIL), không chỉ echo số liệu khô.
 #
-# Usage (default — dùng AWS profile 'thuyldx-cloud' + bucket 'thuyldx-cloud', REGION_TAG TỰ NHẬN DIỆN
-# từ hostname VM, không cần set tay khi chạy trên node HCM hoặc HAN):
-#   ./verify-apisix.sh
+# Usage:
+#   ./verify-apisix.sh pre-apply   # CI/local: merge + dry-run boot trong container cô lập, KHÔNG expose service
+#   ./verify-apisix.sh post-apply  # runtime verification sau khi gitsync/reload đã áp dụng
+#   ./verify-apisix.sh             # backward-compatible alias của post-apply
+#
+# post-apply dùng AWS profile 'thuyldx-cloud' + bucket 'thuyldx-cloud', REGION_TAG TỰ NHẬN DIỆN
+# từ hostname VM, không cần set tay khi chạy trên node HCM hoặc HAN.
 #
 # Override khi cần:
 #   REGION_TAG=hcm ./verify-apisix.sh        # ép region nếu hostname không convention chuẩn
@@ -26,6 +30,260 @@
 # nếu máy nhiều người dùng chung, cân nhắc chạy trong session riêng hoặc dùng cred ngắn hạn (STS).
 
 set -uo pipefail
+
+# ---------- Execution mode ----------------------------------------------------
+# pre-apply tuyệt đối không đọc AWS/Kafka/Vault credential và không gọi bất kỳ
+# endpoint runtime nào. Đây là gate có thể dùng nguyên trạng trong CI/CD.
+VERIFY_MODE="${1:-post-apply}"
+case "${VERIFY_MODE}" in
+  pre-apply|post-apply)
+    [ "$#" -gt 0 ] && shift
+    ;;
+  -h|--help|help)
+    cat <<'EOF'
+Usage:
+  verify-apisix.sh pre-apply
+  verify-apisix.sh post-apply
+
+Environment for pre-apply:
+  BASE_DIR=/path/to/repo          (default: repository root derived from this script)
+  DC_PROFILE=proxyhub             (default: read from .env, then proxyhub)
+  APISIX_IMAGE=apache/apisix:...  (default: image declared for apisix-standalone in docker-compose.yaml)
+  PULL_APISIX_IMAGE=0             (do not pull a missing image; default: pull it)
+  KEEP_DRYRUN_ARTIFACTS=1         (keep the generated apisix-<profile>.yaml on failure/success)
+
+pre-apply performs: shell syntax, Docker Compose syntax, fragment merge,
+Lua syntax, `apisix init`, and a short isolated APISIX boot. It never exposes
+host ports or contacts upstream services.
+EOF
+    exit 0
+    ;;
+  *)
+    echo "ERROR: mode không hợp lệ: ${VERIFY_MODE}. Dùng: pre-apply | post-apply" >&2
+    exit 64
+    ;;
+esac
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT_DEFAULT="$(CDPATH= cd -- "${script_dir}/../.." && pwd)"
+
+pre_ok()   { echo "  [OK]     $*"; }
+pre_fail() { echo "  [FAIL]   $*" >&2; PRE_FAIL=$((PRE_FAIL + 1)); }
+pre_info() { echo "  [INFO]   $*"; }
+
+detect_apisix_image() {
+  # docker-compose.yaml hiện dùng một image literal dưới service apisix-standalone.
+  # Parse hẹp block đó để dry-run luôn bám đúng image production, không hardcode
+  # version thứ hai trong script.
+  sed -n '/^  apisix-standalone:$/,/^  [^[:space:]]/ {
+    s/^[[:space:]]*image:[[:space:]]*//p
+  }' "${1}/docker-compose.yaml" | head -1
+}
+
+run_pre_apply() {
+  set -o pipefail
+  PRE_FAIL=0
+  local base_dir profile image tmp_dir merged_file compose_dir keep_artifacts
+
+  base_dir="${BASE_DIR:-${REPO_ROOT_DEFAULT}}"
+  if ! base_dir="$(CDPATH= cd -- "${base_dir}" && pwd)"; then
+    echo "ERROR: BASE_DIR không tồn tại: ${BASE_DIR:-${REPO_ROOT_DEFAULT}}" >&2
+    return 2
+  fi
+
+  profile="${DC_PROFILE:-}"
+  if [ -z "${profile}" ] && [ -f "${base_dir}/.env" ]; then
+    profile="$(sed -n 's/^DC_PROFILE=//p' "${base_dir}/.env" | tail -1)"
+  fi
+  profile="${profile:-proxyhub}"
+  case "${profile}" in
+    *[!A-Za-z0-9_-]*|'')
+      echo "ERROR: DC_PROFILE không hợp lệ: '${profile}'" >&2
+      return 2
+      ;;
+  esac
+
+  image="${APISIX_IMAGE:-$(detect_apisix_image "${base_dir}")}"
+  image="${image:-apache/apisix:3.17.0-debian}"
+  keep_artifacts="${KEEP_DRYRUN_ARTIFACTS:-0}"
+
+  echo "================================================================"
+  echo " APISIX standalone pre-apply gate"
+  echo " Repository: ${base_dir}"
+  echo " Profile:    ${profile}"
+  echo " Image:      ${image}"
+  echo "================================================================"
+
+  for required in docker-compose.yaml "apisix_config/config-${profile}.yaml" apisix_routes \
+                  scripts/runtime/merge-fragments.sh plugins/custom plugins/libraries; do
+    if [ -e "${base_dir}/${required}" ]; then
+      pre_ok "required path: ${required}"
+    else
+      pre_fail "missing required path: ${required}"
+    fi
+  done
+  if [ "${PRE_FAIL}" -gt 0 ]; then
+    return 1
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "ERROR: docker CLI là bắt buộc cho pre-apply dry-run." >&2
+    return 127
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: Docker daemon không sẵn sàng; không thể thực hiện APISIX dry-run." >&2
+    return 1
+  fi
+
+  # Bash parser được dùng cho toàn bộ shell script trong repo: POSIX sh cũng là
+  # subset hợp lệ của bash. Lỗi syntax bị chặn trước khi gọi container.
+  while IFS= read -r -d '' shell_file; do
+    if bash -n "${shell_file}"; then
+      pre_ok "shell syntax: ${shell_file#${base_dir}/}"
+    else
+      pre_fail "shell syntax: ${shell_file#${base_dir}/}"
+    fi
+  done < <(find "${base_dir}/scripts" -type f -name '*.sh' -print0 | sort -z)
+  if [ "${PRE_FAIL}" -gt 0 ]; then
+    return 1
+  fi
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/apisix-preapply.XXXXXX")"
+  merged_file="${tmp_dir}/apisix-${profile}.yaml"
+  compose_dir="${tmp_dir}/compose"
+  mkdir -p "${compose_dir}"
+  # docker compose luôn resolve env_file: .env. Dùng project copy tạm để validate
+  # chính compose syntax mà không yêu cầu secret production phải có trong CI.
+  cp "${base_dir}/docker-compose.yaml" "${compose_dir}/docker-compose.yaml"
+  {
+    printf 'DC_PROFILE=%s\n' "${profile}"
+    printf 'ORDER_NUM=0\n'
+    printf 'VAULT_ADDR=http://127.0.0.1:8200\n'
+    printf 'VAULT_TOKEN=dry-run-not-a-secret\n'
+  } > "${compose_dir}/.env"
+
+  cleanup_pre_apply() {
+    if [ "${keep_artifacts}" = "1" ]; then
+      pre_info "Giữ dry-run artifacts tại: ${tmp_dir}"
+    else
+      rm -rf "${tmp_dir}"
+    fi
+  }
+  trap cleanup_pre_apply RETURN
+
+  if docker compose -f "${compose_dir}/docker-compose.yaml" config -q >/dev/null 2>&1; then
+    pre_ok "docker compose syntax + variable interpolation"
+  else
+    pre_fail "docker compose config không hợp lệ (chạy docker compose -f ${compose_dir}/docker-compose.yaml config để xem chi tiết)"
+  fi
+  if [ "${PRE_FAIL}" -gt 0 ]; then
+    return 1
+  fi
+
+  if ! docker image inspect "${image}" >/dev/null 2>&1; then
+    if [ "${PULL_APISIX_IMAGE:-1}" = "0" ]; then
+      pre_fail "thiếu image ${image} (PULL_APISIX_IMAGE=0)"
+      return 1
+    fi
+    pre_info "Pull APISIX image ${image} cho dry-run..."
+    if ! docker pull "${image}"; then
+      pre_fail "không pull được image ${image}"
+      return 1
+    fi
+  fi
+
+  # Toàn bộ validation có ý nghĩa APISIX chạy bên trong *một* container dùng
+  # đúng image production. `apisix init` bắt lỗi render/config, còn boot ngắn
+  # buộc config_yaml load entity + plugin schema thật. Không có --network host,
+  # không expose port, không gọi upstream và không được cấp secret thật nào.
+  if docker run --rm \
+      --network none \
+      --user 0:0 \
+      -e "DC_PROFILE=${profile}" \
+      -e "APISIX_PROFILE=${profile}" \
+      -e 'SKIP_SAMPLE_UPDATE=1' \
+      -e 'VAULT_ADDR=http://127.0.0.1:8200' \
+      -e 'VAULT_TOKEN=dry-run-not-a-secret' \
+      -v "${base_dir}:/workspace:ro" \
+      -v "${tmp_dir}:/dry-run" \
+      --entrypoint /bin/sh \
+      "${image}" -ec '
+        set -eu
+        profile="${DC_PROFILE}"
+        /workspace/scripts/runtime/merge-fragments.sh \
+          /workspace/apisix_routes "/dry-run/apisix-${profile}.yaml"
+
+        cp "/workspace/apisix_config/config-${profile}.yaml" \
+          "/usr/local/apisix/conf/config-${profile}.yaml"
+        cp "/dry-run/apisix-${profile}.yaml" \
+          "/usr/local/apisix/conf/apisix-${profile}.yaml"
+
+        # Mount layout giống production để schema validation có thể load custom plugin.
+        rm -rf /usr/local/apisix/apisix/plugins/custom /usr/local/apisix/apisix/plugins/libraries
+        ln -s /workspace/plugins/custom /usr/local/apisix/apisix/plugins/custom
+        ln -s /workspace/plugins/libraries /usr/local/apisix/apisix/plugins/libraries
+        if [ -d /workspace/certs ]; then
+          rm -rf /usr/local/apisix/certs
+          ln -s /workspace/certs /usr/local/apisix/certs
+        fi
+
+        # Các patch chỉ tồn tại sau deploy script; nếu source checkout đã có thì
+        # validate chính bản sẽ được mount production, nếu chưa có dùng core image.
+        for patch in vault config_yaml kafka-logger; do
+          if [ -f "/workspace/${patch}.lua" ]; then
+            case "${patch}" in
+              vault) target=/usr/local/apisix/apisix/secret/vault.lua ;;
+              config_yaml) target=/usr/local/apisix/apisix/core/config_yaml.lua ;;
+              kafka-logger) target=/usr/local/apisix/apisix/plugins/kafka-logger.lua ;;
+            esac
+            cp "/workspace/${patch}.lua" "${target}"
+          fi
+        done
+
+        find /workspace/plugins -type f -name "*.lua" -print0 | sort -z | \
+          xargs -0 -r -n1 /usr/local/openresty/luajit/bin/luajit -bl >/dev/null
+        apisix init
+        test -s /usr/local/apisix/conf/nginx.conf
+
+        # `init` chỉ parse/render. Schema của standalone entities được nạp bởi
+        # config_yaml trong Nginx worker, nên phải boot ngắn để bắt các lỗi như
+        # unknown plugin, group conf mismatched, hoặc entity sai schema.
+        trap "apisix quit >/dev/null 2>&1 || true" EXIT
+        apisix start
+        ready=0
+        for _ in $(seq 1 20); do
+          if apisix status >/dev/null 2>&1; then
+            ready=1
+            break
+          fi
+          sleep 0.25
+        done
+        if [ "${ready}" -ne 1 ]; then
+          echo "APISIX did not become ready during dry-run" >&2
+          cat /usr/local/apisix/logs/error.log >&2 2>/dev/null || true
+          exit 1
+        fi
+        apisix quit
+        trap - EXIT
+      '; then
+    pre_ok "fragment merge + Lua syntax + APISIX config/schema dry-run"
+  else
+    pre_fail "APISIX dry-run thất bại; merged file được giữ tại ${merged_file} để debug trong lần chạy này"
+    keep_artifacts=1
+  fi
+
+  if [ "${PRE_FAIL}" -gt 0 ]; then
+    echo "PRE-APPLY: FAIL (${PRE_FAIL} gate lỗi)"
+    return 1
+  fi
+  echo "PRE-APPLY: PASS — an toàn để apply qua GitOps."
+  return 0
+}
+
+if [ "${VERIFY_MODE}" = "pre-apply" ]; then
+  run_pre_apply
+  exit $?
+fi
 
 # ---------- AWS credentials (KHÔNG hardcode secret vào script — dùng AWS profile) ----------
 # Ưu tiên theo thứ tự:
