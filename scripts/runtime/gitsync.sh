@@ -7,6 +7,8 @@ ROUTES_SRC="${SYNC_SRC}/apisix_routes"
 OUTPUT="/tmp/apisix_routes/apisix-${DC_PROFILE:-}.yaml"
 MERGE_SCRIPT="/tmp/scripts/runtime/merge-fragments.sh"
 INJECT_SCRIPT="/tmp/scripts/runtime/inject-certs.sh"
+ADC_DIR="/tmp/adc"
+ADC_TIMEOUT="${ADC_TIMEOUT:-90}"
 
 LOG_FILE="/tmp/logs/gitsync.log"
 mkdir -p "$(dirname "${LOG_FILE}")" 2>/dev/null || true
@@ -106,6 +108,35 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     rm -f "${STAGING}"
     exit 1
   fi
+
+  # Gate: GitSync đã pull candidate nhưng chưa được phép ghi file live. ADC là
+  # service riêng, không cần/không được cấp Docker socket cho git-sync.
+  ADC_REQUEST="${ADC_DIR}/request-${DC_PROFILE}"
+  ADC_RESULT="${ADC_DIR}/result-${DC_PROFILE}"
+  ADC_APPROVED="${ADC_DIR}/approved-${DC_PROFILE}.yaml"
+  [ -d "${ADC_DIR}" ] || { log_err "ERROR: ADC shared dir missing; live config unchanged"; rm -f "${STAGING}"; exit 1; }
+  printf '%s\n' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
+  mv "${ADC_REQUEST}.tmp.$$" "${ADC_REQUEST}"
+  log "ADC validation requested: commit=${COMMIT_HASH}, timeout=${ADC_TIMEOUT}s"
+  ADC_ELAPSED=0; ADC_STATUS=""; ADC_DETAIL=""
+  while [ "${ADC_ELAPSED}" -lt "${ADC_TIMEOUT}" ]; do
+    if [ -f "${ADC_RESULT}" ]; then
+      ADC_LINE=$(cat "${ADC_RESULT}" 2>/dev/null || true)
+      ADC_COMMIT=$(printf '%s' "${ADC_LINE}" | cut -f1)
+      ADC_STATUS=$(printf '%s' "${ADC_LINE}" | cut -f2)
+      ADC_DETAIL=$(printf '%s' "${ADC_LINE}" | cut -f3-)
+      [ "${ADC_COMMIT}" = "${COMMIT_HASH}" ] && break
+    fi
+    sleep 1; ADC_ELAPSED=$((ADC_ELAPSED + 1))
+  done
+  if [ "${ADC_STATUS}" != "PASS" ] || [ ! -s "${ADC_APPROVED}" ]; then
+    log_err "ERROR: ADC verdict for ${COMMIT_HASH}: ${ADC_STATUS:-TIMEOUT} ${ADC_DETAIL}; live config unchanged"
+    rm -f "${STAGING}"
+    exit 1
+  fi
+  # STAGING là output đã qua inject-certs ở trên; không copy artifact ADC đè
+  # lên đây vì ADC chủ đích chỉ validate source/merge trong network none.
+  log "ADC PASS: promoting injected staging artifact for ${COMMIT_HASH}"
 
   cp "${STAGING}" "${OUTPUT}"
   rm -f "${STAGING}"
