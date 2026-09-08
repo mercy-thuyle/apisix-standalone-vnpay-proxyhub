@@ -1,5 +1,5 @@
 upstreams:
-  # ── Hyperstore Cloudian CMC (HCM nodes) ──
+  # ── APISIX S3 gateway (multisite: HCM + HAN) ──
   - id: "upstream-s3"
     name: "s3"
     type: roundrobin
@@ -8,24 +8,18 @@ upstreams:
     # hash_on: "cookie"     # đổi sticky-session sang key ổn định hơn IP nguồn (JSESSIONID)
     # key: "JSESSIONID"     # route theo session thật, không phụ thuộc IP nguồn
     nodes:
-      - host: "172.26.29.231"
-        port: 8443
+      - host: "s3-hcm.sds.infiniband.vn"
+        port: 443
         weight: 1
-        priority: 10
-      - host: "172.26.29.232"
-        port: 8443
+      - host: "s3-hni.sds.infiniband.vn"
+        port: 443
         weight: 1
-        priority: 0
-      - host: "172.26.29.233"
-        port: 8443
-        weight: 1
-        priority: 0
-    retries: 2
+    retries: 1
     # retries: 0
     checks:
       active:
         type: "https"
-        host: "cmc.sds.infiniband.vn"
+        # host: "cmc.sds.infiniband.vn"
         http_path: "/"
         https_verify_certificate: false
         req_headers:

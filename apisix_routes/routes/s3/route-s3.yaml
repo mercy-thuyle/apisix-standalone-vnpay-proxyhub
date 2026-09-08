@@ -9,6 +9,8 @@ routes:
     hosts:
       - "s3-hcm.sds.infiniband.vn"
       - "*.s3-hcm.sds.infiniband.vn"
+      - "s3-hni.sds.infiniband.vn"
+      - "*.s3-hni.sds.infiniband.vn"
     # vars:
     #   - ["scheme", "==", "http"]
     #   - ["remote_addr", "!=", "172.26.29.231"]

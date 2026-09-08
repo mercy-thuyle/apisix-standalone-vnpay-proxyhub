@@ -1,4 +1,7 @@
 apisix:
+  dns_resolver:
+    - "10.157.10.53"
+
   node_listen:
     - port: 80
 
