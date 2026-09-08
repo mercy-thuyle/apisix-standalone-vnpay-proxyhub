@@ -4,7 +4,7 @@ routes:
     name: "s3"
     status: 1
     service_id: "service-upstream-s3-hcm"
-    plugin_config_id: "plugin-config-s3-bucket-guard"
+    plugin_config_id: "plugin-config-s3-bucket-guard-hcm"
     uri: "/*"
     hosts:
       - "s3-hcm.sds.infiniband.vn"
@@ -38,7 +38,7 @@ routes:
     name: "s3"
     status: 1
     service_id: "service-upstream-s3-hni"
-    plugin_config_id: "plugin-config-s3-bucket-guard"
+    plugin_config_id: "plugin-config-s3-bucket-guard-hni"
     uri: "/*"
     hosts:
       - "s3-hni.sds.infiniband.vn"
