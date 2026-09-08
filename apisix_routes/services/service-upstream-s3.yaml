@@ -1,4 +1,8 @@
 services:
-  - id: "service-upstream-s3"
+  - id: "service-upstream-s3-hcm"
     name: "s3"
-    upstream_id: "upstream-s3"
+    upstream_id: "upstream-s3-hcm"
+
+  - id: "service-upstream-s3-hni"
+    name: "s3"
+    upstream_id: "upstream-s3-hni"
