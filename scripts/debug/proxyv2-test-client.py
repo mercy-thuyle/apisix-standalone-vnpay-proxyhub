@@ -48,4 +48,5 @@ def send_proxyv2_request(host, target_ip, port, network_id, path="/"):
 if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "s3-hcm.sds.infiniband.vn"
     nid = sys.argv[2] if len(sys.argv) > 2 else "test-network-id-manual-verify"
-    print(send_proxyv2_request(host, "127.0.0.1", 8443, nid))
+    path = sys.argv[3] if len(sys.argv) > 3 else "/"
+    print(send_proxyv2_request(host, "127.0.0.1", 8443, nid, path))
