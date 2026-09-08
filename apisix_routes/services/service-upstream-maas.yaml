@@ -1,4 +1,8 @@
 services:
-  - id: "service-upstream-maas"
-    name: "maas"
-    upstream_id: "upstream-maas"
+  - id: "service-upstream-maas-logs"
+    name: "maas-logs"
+    upstream_id: "upstream-maas-logs"
+
+  - id: "service-upstream-maas-metrics"
+    name: "maas-metrics"
+    upstream_id: "upstream-maas-metrics"

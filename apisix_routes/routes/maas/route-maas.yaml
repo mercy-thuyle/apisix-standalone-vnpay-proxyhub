@@ -1,34 +1,25 @@
 routes:
-  # ── MAAS ──
-  - id: "route-maas"
-    name: "maas"
+  # ── MAAS Logs (Loki) ──
+  - id: "route-maas-logs"
+    name: "maas-logs"
     status: 1
-    service_id: "service-upstream-maas"
-    # plugin_config_id: "plugin-config-s3-bucket-guard"
+    service_id: "service-upstream-maas-logs"
     uri: "/*"
     hosts:
-      - "maas.infiniband.vn"
-      - "*.maas.infiniband.vn"
-    # vars:
-    #   - ["scheme", "==", "http"]
-    #   - ["remote_addr", "!=", "172.26.29.231"]
+      - "sb-logs-observe.infiniband.vn"
+    timeout:
+      connect: 60
+      send: 600
+      read: 600
 
-    # plugins:
-
-    #   custom.s3-normalizer-bucket-name:
-    #     path_hosts:
-    #       - "s3-hcm.sds.infiniband.vn"
-    #     vhost_domains:
-    #       - "s3%-hcm%.sds%.infiniband%.vn"
-
-    #   custom.s3-accesskey-extractor:
-    #     set_header: "X-S3-Access-Key"
-    #     anonymous_use_ip: true
-
-    #   custom.s3-qos-consumer: {}
-
-    #   custom.s3-traffic-classifier: {}
-
+  # ── MAAS Metrics (Mimir) ──
+  - id: "route-maas-metrics"
+    name: "maas-metrics"
+    status: 1
+    service_id: "service-upstream-maas-metrics"
+    uri: "/*"
+    hosts:
+      - "sb-metrics-observe.infiniband.vn"
     timeout:
       connect: 60
       send: 600

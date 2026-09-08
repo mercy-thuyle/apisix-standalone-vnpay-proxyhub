@@ -1,30 +1,21 @@
 upstreams:
-  # ── Hyperstore Cloudian CMC (HCM nodes) ──
-  - id: "upstream-maas"
-    name: "maas"
+  # ── MAAS Logs (Loki) — Private Domain that theo bang Mercy cung cap ──
+  - id: "upstream-maas-logs"
+    name: "maas-logs"
     type: roundrobin
     scheme: "https"
     pass_host: "pass"
     # hash_on: "cookie"     # đổi sticky-session sang key ổn định hơn IP nguồn (JSESSIONID)
     # key: "JSESSIONID"     # route theo session thật, không phụ thuộc IP nguồn
     nodes:
-      - host: "172.26.29.231"
-        port: 8443
+      - host: "maas-service-logs.infiniband.vn"
+        port: 443
         weight: 1
-        priority: 10
-      - host: "172.26.29.232"
-        port: 8443
-        weight: 1
-        priority: 0
-      - host: "172.26.29.233"
-        port: 8443
-        weight: 1
-        priority: 0
-    retries: 2
     # retries: 0
     checks:
       active:
         type: "https"
+        # host: "maas-service-logs.infiniband.vn"
         host: "cmc.sds.infiniband.vn"
         http_path: "/"
         https_verify_certificate: false
@@ -53,41 +44,114 @@ upstreams:
           tcp_failures: 2
           http_failures: 5
           
-      passive:
-        type: http
+      # passive:
+      #   type: http
+      #   healthy:
+      #     http_statuses:
+      #     - 200
+      #     - 201
+      #     - 202
+      #     - 203
+      #     - 204
+      #     - 205
+      #     - 206
+      #     - 207
+      #     - 208
+      #     - 226
+      #     - 300
+      #     - 301
+      #     - 302
+      #     - 303
+      #     - 304
+      #     - 305
+      #     - 306
+      #     - 307
+      #     - 308
+      #     successes: 5
+      #   unhealthy:
+      #     http_statuses:
+      #       - 429
+      #       - 500
+      #       - 503
+      #     timeouts: 7
+      #     tcp_failures: 2
+      #     http_failures: 5
+      #     # timeouts: 0
+      #     # tcp_failures: 0
+      #     # http_failures: 0
+
+    timeout:
+      connect: 30
+      send: 600
+      read: 300
+
+  # ── MAAS Metrics (Mimir) ──
+  - id: "upstream-maas-metrics"
+    name: "maas-metrics"
+    type: roundrobin
+    scheme: "https"
+    pass_host: "pass"
+    nodes:
+      - host: "maas-service-metrics.infiniband.vn"
+        port: 443
+        weight: 1
+    retries: 2
+    checks:
+      active:
+        type: "https"
+        # host: "maas-service-metrics.infiniband.vn"
+        http_path: "/"
+        https_verify_certificate: false
+        req_headers:
+          - "User-Agent: APISIX-HealthCheck"
+        concurrency: 10
+        timeout: 5
         healthy:
-          http_statuses:
-          - 200
-          - 201
-          - 202
-          - 203
-          - 204
-          - 205
-          - 206
-          - 207
-          - 208
-          - 226
-          - 300
-          - 301
-          - 302
-          - 303
-          - 304
-          - 305
-          - 306
-          - 307
-          - 308
-          successes: 5
+          http_statuses: [200, 302]
+          interval: 10
+          successes: 2
         unhealthy:
-          http_statuses:
-            - 429
-            - 500
-            - 503
-          timeouts: 7
+          http_statuses: [404, 429, 500, 501, 502, 503, 504, 505]
+          interval: 5
+          timeouts: 3
           tcp_failures: 2
           http_failures: 5
-          # timeouts: 0
-          # tcp_failures: 0
-          # http_failures: 0
+
+      # passive:
+      #   type: http
+      #   healthy:
+      #     http_statuses:
+      #     - 200
+      #     - 201
+      #     - 202
+      #     - 203
+      #     - 204
+      #     - 205
+      #     - 206
+      #     - 207
+      #     - 208
+      #     - 226
+      #     - 300
+      #     - 301
+      #     - 302
+      #     - 303
+      #     - 304
+      #     - 305
+      #     - 306
+      #     - 307
+      #     - 308
+      #     successes: 5
+      #   unhealthy:
+      #     http_statuses:
+      #       - 429
+      #       - 500
+      #       - 503
+      #     timeouts: 7
+      #     tcp_failures: 2
+      #     http_failures: 5
+      #     # timeouts: 0
+      #     # tcp_failures: 0
+      #     # http_failures: 0
 
     timeout:
       connect: 30
