@@ -1,10 +1,32 @@
 plugin_configs:
-  - id: "plugin-config-s3-bucket-guard"
+  - id: "plugin-config-s3-bucket-guard-hcm"
     plugins:
 
       custom.s3-network-bucket-guard:
         network_id_header: "X-Network-Id"
         apex_host: "s3-hcm.sds.infiniband.vn"
+        vault_mount: "cloud/profile"
+        vault_prefix: "app/apisix-proxyhub/network-buckets"   # namespace riêng, xác nhận quyền 'read' qua sys/capabilities-self
+        cache_ttl: 60
+        fail_open: false
+        reject_code: 403
+
+      # ip-restriction:
+      #   # blacklist: []
+      #   blacklist:
+      #     - "198.51.100.44"
+      #     # - "999.999.999.999"
+      #     # - "198.51.100.44
+
+      # custom.test-header-capture:
+      #   header_name: "X-Dry-Run-Test"
+
+  - id: "plugin-config-s3-bucket-guard-hni"
+    plugins:
+
+      custom.s3-network-bucket-guard:
+        network_id_header: "X-Network-Id"
+        apex_host: "s3-hni.sds.infiniband.vn"
         vault_mount: "cloud/profile"
         vault_prefix: "app/apisix-proxyhub/network-buckets"   # namespace riêng, xác nhận quyền 'read' qua sys/capabilities-self
         cache_ttl: 60
