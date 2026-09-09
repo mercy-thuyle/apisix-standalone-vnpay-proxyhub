@@ -1,15 +1,15 @@
-# routes:
-#   - id: "route-adc-validation"
-#     name: "adc-validation-disabled"
-#     status: 0
-#     uri: "/__adc-validation"
-#     upstream:
-#       type: roundrobin
-#       nodes:
-#         "127.0.0.1:1": 1
-#     plugins:
-#       ip-restriction:
-#         blacklist:
-#           - "203.0.113.10"
-#       custom.test-header-capture:
-#         header_name: "X-ADC-Test"
+routes:
+  - id: "route-adc-validation"
+    name: "adc-validation-disabled"
+    status: 0
+    uri: "/__adc-validation"
+    upstream:
+      type: roundrobin
+      nodes:
+        "127.0.0.1:1": 1
+    plugins:
+      ip-restriction:
+        blacklist:
+          - "203.0.113.10"
+      custom.test-header-capture:
+        header_name: "X-ADC-Test"
