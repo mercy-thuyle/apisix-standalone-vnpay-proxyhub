@@ -131,8 +131,10 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     exit 1
   fi
 
-  # Xóa artifact cùng SHA nếu một lần chạy dang dở trước đó để lại.
-  rm -f "${ADC_APPROVED}"
+  # Không xóa artifact cùng SHA ở đây.
+  # ADC_RESULT và ADC_APPROVED đều gắn SHA bất biến của checkout; một PASS
+  # chỉ hợp lệ khi cả hai cùng tồn tại. Xóa file này trước khi đọc verdict
+  # sẽ làm GitSync thấy "PASS" nhưng thiếu chứng thực và không thể promote.
   printf '%s\n' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
   mv "${ADC_REQUEST}.tmp.$$" "${ADC_REQUEST}"
   log "ADC validation requested: commit=${COMMIT_HASH}, timeout=${ADC_TIMEOUT}s"
