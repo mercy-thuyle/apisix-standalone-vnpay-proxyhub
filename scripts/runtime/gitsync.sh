@@ -4,11 +4,11 @@
 #
 # The VM is the deployment boundary: GitSync pulls GitLab, creates a staging
 # route file, injects certificates, asks the separate VNPAY ADC container to
-# validate the pulled commit, and promotes only after PASS. The existing live
+# validate the pulled commit, and promotes only after PASS.  The existing live
 # file remains unchanged on merge, certificate, ADC, or timeout failure.
 #
 # This script does not sync apisix_config/: those files are admin-managed and
-# restart-sensitive. It also uses cp (not mv) during promotion to preserve the
+# restart-sensitive.  It also uses cp (not mv) during promotion to preserve the
 # inode of the bind-mounted route file observed by APISIX.
 
 set -eu
@@ -48,7 +48,7 @@ run_logged() {
 }
 
 # ── Single-run lock ─────────────────────────────────────────────────────────
-# GitSync runs every 30 seconds; ADC validation may take longer. Never allow
+# GitSync runs every 30 seconds; ADC validation may take longer.  Never allow
 # a later hook to overwrite this run's staging artifact or ADC request.
 LOCK_DIR="/tmp/.gitsync.lock"
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
@@ -76,7 +76,10 @@ fi
 log "START — DC_PROFILE=${DC_PROFILE} | commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}"
 
 # ── Fragment layout: merge → inject → ADC gate → promote ───────────────────
-if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ -d "${ROUTES_SRC}/services" ] &&    [ -d "${ROUTES_SRC}/ssls" ]; then
+if [ -d "${ROUTES_SRC}/upstreams" ] && \
+   [ -d "${ROUTES_SRC}/routes" ] && \
+   [ -d "${ROUTES_SRC}/services" ] && \
+   [ -d "${ROUTES_SRC}/ssls" ]; then
 
   log "Layout: fragments (core: upstreams/ routes/ services/ ssls/; tùy chọn: plugin_metadata/ plugin_configs/ global_rules/ consumer_groups/ consumers/)"
 
@@ -93,8 +96,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ 
     log_err "ERROR: merge-fragments.sh thất bại — output không thay đổi"
 
     if [ -n "${MERGE_ERRORS}" ]; then
-      printf '%s
-' "${MERGE_ERRORS}" | while IFS= read -r eline; do
+      printf '%s\n' "${MERGE_ERRORS}" | while IFS= read -r eline; do
         log_err "  → nguyên nhân: ${eline}"
       done
     fi
@@ -106,7 +108,10 @@ if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ 
   # Certificate injection is part of the staging transaction, never live I/O.
   INJECT_OK=1
   if [ -f "${INJECT_SCRIPT}" ]; then
-    if ! OUTPUT="${STAGING}"          CERTS_DIR="/tmp/certs"          DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt"          run_logged sh "${INJECT_SCRIPT}"; then
+    if ! OUTPUT="${STAGING}" \
+         CERTS_DIR="/tmp/certs" \
+         DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt" \
+         run_logged sh "${INJECT_SCRIPT}"; then
       INJECT_OK=0
     fi
   else
@@ -121,7 +126,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ 
   fi
 
   # ADC validates the same GitSync checkout but has no Docker socket and cannot
-  # write the live bind mount. The request file is atomically replaced.
+  # write the live bind mount.  The request file is atomically replaced.
   ADC_REQUEST="${ADC_DIR}/request-${DC_PROFILE}"
   ADC_RESULT="${ADC_DIR}/result-${DC_PROFILE}"
   ADC_APPROVED="${ADC_DIR}/approved-${DC_PROFILE}.yaml"
@@ -132,8 +137,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ 
     exit 1
   fi
 
-  printf '%s
-' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
+  printf '%s\n' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
   mv "${ADC_REQUEST}.tmp.$$" "${ADC_REQUEST}"
   log "ADC validation requested: commit=${COMMIT_HASH}, timeout=${ADC_TIMEOUT}s"
 
@@ -170,13 +174,19 @@ if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ 
   cp "${STAGING}" "${OUTPUT}"
   rm -f "${STAGING}"
 
-  if grep -q "<<THAY" "${OUTPUT}" 2>/dev/null ||      grep -q "CHANGE_ME" "${OUTPUT}" 2>/dev/null; then
+  if grep -q "<<THAY" "${OUTPUT}" 2>/dev/null || \
+     grep -q "CHANGE_ME" "${OUTPUT}" 2>/dev/null; then
     log "INFO: Output còn credential placeholder — cần inject apikey cho apisix_routes/consumers/ trước khi sử dụng"
   fi
 
   if grep -q "^plugin_metadata:" "${OUTPUT}" 2>/dev/null; then
-    PM_IDS=$(sed -n '/^plugin_metadata:/,/^upstreams:/p' "${OUTPUT}"              | grep -E '^\s+-\s+id:'              | sed 's/.*id:[[:space:]]*//'              | sed 's/[[:space:]]*#.*//'              | tr -d '"'              | sed 's/[[:space:]]*$//'              | tr '
-' ',' | sed 's/,$//')
+    PM_IDS=$(sed -n '/^plugin_metadata:/,/^upstreams:/p' "${OUTPUT}" \
+             | grep -E '^\s+-\s+id:' \
+             | sed 's/.*id:[[:space:]]*//' \
+             | sed 's/[[:space:]]*#.*//' \
+             | tr -d '"' \
+             | sed 's/[[:space:]]*$//' \
+             | tr '\n' ',' | sed 's/,$//')
     log "INFO: plugin_metadata đang active cho plugin: ${PM_IDS:-?} — áp dụng GLOBAL cho mọi route/service dùng plugin đó, không phải chỉ route gắn global_rules."
   else
     log "INFO: Không có plugin_metadata (bỏ qua — tùy chọn, log_format các logger dùng schema mặc định của plugin)"
@@ -199,7 +209,10 @@ elif [ -f "${ROUTES_SRC}/apisix-${DC_PROFILE}.yaml" ]; then
   fi
 
   if [ -f "${INJECT_SCRIPT}" ]; then
-    OUTPUT="${OUTPUT}"     CERTS_DIR="/tmp/certs"     DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt"     run_logged sh "${INJECT_SCRIPT}"
+    OUTPUT="${OUTPUT}" \
+    CERTS_DIR="/tmp/certs" \
+    DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt" \
+    run_logged sh "${INJECT_SCRIPT}"
   fi
   # echo "[gitsync] Cert injection: skipped (using Vault secret provider)"
 
@@ -210,7 +223,7 @@ else
   exit 1
 fi
 
-# ── Runtime assets synchronized after route promotion ───────────────────────
+# ── Runtime assets synchronized after route promotion ────────────────────────
 log "Syncing plugins/..."
 if [ -d "${SYNC_SRC}/plugins" ]; then
   cp -r "${SYNC_SRC}/plugins/." "/tmp/plugins/"
