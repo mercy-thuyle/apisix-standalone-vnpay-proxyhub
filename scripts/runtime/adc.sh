@@ -21,9 +21,21 @@ PROFILE="${DC_PROFILE:?DC_PROFILE is required}"
 REQUEST="${ADC_DIR}/request-${PROFILE}"
 RESULT="${ADC_DIR}/result-${PROFILE}"
 HEARTBEAT="${ADC_DIR}/heartbeat-${PROFILE}"
+LOG_DIR="/tmp/logs/adc"
+LOG_FILE="${LOG_DIR}/adc.log"
 
 mkdir -p "${ADC_DIR}/work"
+mkdir -p "${LOG_DIR}"
+touch "${LOG_FILE}" 2>/dev/null || true
 last_commit=""
+
+# Ghi log vận hành ra Docker stdout và logs/adc/adc.log trên host.
+# Không log nội dung YAML hoặc biến môi trường để tránh lộ secret.
+log() {
+  _msg="[adc] $(date -Iseconds) $*"
+  printf '%s\n' "${_msg}"
+  printf '%s\n' "${_msg}" >> "${LOG_FILE}" 2>/dev/null || true
+}
 
 # Ghi verdict theo cách atomic để GitSync không đọc phải dòng dang dở.
 result() {
@@ -34,6 +46,7 @@ result() {
 
   printf '%s\t%s\t%s\n' "${commit}" "${status}" "${detail}" > "${tmp}"
   mv "${tmp}" "${RESULT}"
+  log "VERDICT — commit=${commit} status=${status} detail=${detail}"
 }
 
 # Validate một checkout GitSync bất biến. Mọi lỗi đều trả về cho bên yêu cầu;
@@ -46,6 +59,7 @@ validate() {
 
   rm -rf "${work}"
   mkdir -p "${work}"
+  log "START — commit=${commit} work=${work}"
 
 # GitSync chỉ gọi exechook sau khi checkout hoàn tất và chờ hook kết thúc trước khi sync tiếp.
 # Lock của gitsync.sh cũng chặn transaction chồng nhau;
@@ -66,6 +80,7 @@ validate() {
     result "${commit}" FAIL "merge failed"
     return
   fi
+  log "OK — merge fragments"
 
   # Dựng private view APISIX của validator từ checkout candidate.
   cp "${SYNC_SRC}/apisix_config/config-${PROFILE}.yaml" \
@@ -108,17 +123,21 @@ validate() {
     result "${commit}" FAIL "Lua syntax failed"
     return
   fi
+  log "OK — Lua syntax"
 
   if ! apisix init > "${work}/apisix-init.log" 2>&1; then
     result "${commit}" FAIL "apisix init failed"
     return
   fi
+  log "OK — apisix init"
 
   # Boot ngắn trong network none: config_yaml nạp entity và plugin schema.
   if ! apisix start > "${work}/apisix-start.log" 2>&1; then
+    log "FAIL — apisix start; xem ${work}/apisix-start.log"
     result "${commit}" FAIL "apisix start failed"
     return
   fi
+  log "OK — apisix start"
 
   ready=0
   for _ in $(seq 1 20); do

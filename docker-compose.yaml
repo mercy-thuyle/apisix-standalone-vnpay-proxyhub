@@ -87,6 +87,7 @@ services:
     volumes:
       - ./gitsync:/tmp/sync:ro
       - ./adc:/tmp/adc
+      - ./logs/adc:/tmp/logs/adc
       - ./vault.lua:/tmp/adc-patches/vault.lua:ro
       - ./config_yaml.lua:/tmp/adc-patches/config_yaml.lua:ro
       - ./kafka-logger.lua:/tmp/adc-patches/kafka-logger.lua:ro
