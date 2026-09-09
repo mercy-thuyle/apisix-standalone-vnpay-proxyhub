@@ -75,7 +75,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
 
   log "Layout: fragments (core: upstreams/ routes/ services/ ssls/; tùy chọn: plugin_metadata/ plugin_configs/ global_rules/ consumer_groups/ consumers/)"
 
-  if [ ! -x "${MERGE_SCRIPT}" ]; then
+  if [ ! -f "${MERGE_SCRIPT}" ]; then
     log_err "ERROR: ${MERGE_SCRIPT} không tồn tại hoặc không executable"
     exit 1
   fi
@@ -84,7 +84,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
 
   STAGING="${OUTPUT}.staging"
 
-  if ! run_logged "${MERGE_SCRIPT}" "${ROUTES_SRC}" "${STAGING}"; then
+  if ! run_logged sh "${MERGE_SCRIPT}" "${ROUTES_SRC}" "${STAGING}"; then
     MERGE_ERRORS=$(tail -n +"$((MERGE_LOG_START + 1))" "${LOG_FILE}" 2>/dev/null | grep '\[merge-fragments\] ERROR' || true)
     log_err "ERROR: merge-fragments.sh thất bại — output không thay đổi"
 
