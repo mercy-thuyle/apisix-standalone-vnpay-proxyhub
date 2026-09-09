@@ -131,30 +131,41 @@ validate() {
   fi
   log "OK — apisix init"
 
-  # Boot ngắn trong network none: config_yaml nạp entity và plugin schema.
-  if ! apisix start > "${work}/apisix-start.log" 2>&1; then
-    log "FAIL — apisix start; xem ${work}/apisix-start.log"
-    result "${commit}" FAIL "apisix start failed"
-    return
-  fi
-  log "OK — apisix start"
+  # Image APISIX chạy OpenResty foreground; chạy nền để ADC còn kiểm tra được
+  # worker rồi chủ động quit, không làm GitSync exechook bị treo.
+  apisix start > "${work}/apisix-start.log" 2>&1 &
+  apisix_start_pid=$!
 
   ready=0
   for _ in $(seq 1 20); do
-    if apisix status > /dev/null 2>&1; then
-      ready=1
+    if ! kill -0 "${apisix_start_pid}" 2>/dev/null; then
       break
     fi
+
+    nginx_pid="$(cat /usr/local/apisix/logs/nginx.pid 2>/dev/null || true)"
+    case "${nginx_pid}" in
+      ''|*[!0-9]*) ;;
+      *)
+        if kill -0 "${nginx_pid}" 2>/dev/null; then
+          ready=1
+          break
+        fi
+        ;;
+    esac
     sleep 0.25
   done
 
-  # Dừng worker chạy ngắn ở cả trường hợp thành công và không ready.
-  apisix quit > /dev/null 2>&1 || true
-
   if [ "${ready}" -ne 1 ]; then
+    wait "${apisix_start_pid}" 2>/dev/null || true
+    log "FAIL — APISIX worker không ready; xem ${work}/apisix-start.log"
     result "${commit}" FAIL "APISIX worker not ready"
     return
   fi
+  log "OK — APISIX worker ready"
+
+  # Dừng worker validator; tuyệt đối không ảnh hưởng APISIX production.
+  apisix quit > /dev/null 2>&1 || true
+  wait "${apisix_start_pid}" 2>/dev/null || true
 
   # Artifact này chứng minh ADC thành công; GitSync giữ staging đã inject cert.
   cp "${work}/apisix-${PROFILE}.yaml" "${approved}"
