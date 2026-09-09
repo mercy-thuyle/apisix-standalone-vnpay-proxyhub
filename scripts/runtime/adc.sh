@@ -1,19 +1,19 @@
 #!/bin/sh
 
-# VNPAY ADC (APISIX dry-run controller)
+# VNPAY ADC (bộ điều khiển dry-run APISIX)
 #
-# GitSync writes a commit SHA to /tmp/adc/request-<profile>.  This long-running
-# container validates that exact checkout without network access, then writes
-# one atomic verdict line to /tmp/adc/result-<profile>:
+# GitSync ghi SHA của commit vào /tmp/adc/request-<profile>. Container chạy nền
+# này kiểm tra đúng checkout đó trong môi trường không có network, sau đó ghi
+# một dòng kết quả theo cách atomic vào /tmp/adc/result-<profile>:
 #   <commit>\tPASS|FAIL\t<detail>
 #
-# A PASS also creates approved-<profile>.yaml as proof that the candidate was
-# merged and accepted by APISIX.  GitSync is the only component that promotes
-# its own injected staging file to the live bind-mounted route file.
+# PASS đồng thời tạo approved-<profile>.yaml, chứng minh candidate đã merge và
+# được APISIX chấp nhận. Chỉ GitSync mới được promote file staging đã inject
+# của chính nó sang file route live đang bind mount.
 
 set -eu
 
-# ── Shared state and source checkout ────────────────────────────────────────
+# ── Trạng thái dùng chung và checkout source ─────────────────────────────────
 SYNC_SRC="/tmp/sync/current"
 ADC_DIR="/tmp/adc"
 PROFILE="${DC_PROFILE:?DC_PROFILE is required}"
@@ -25,7 +25,7 @@ APPROVED="${ADC_DIR}/approved-${PROFILE}.yaml"
 mkdir -p "${ADC_DIR}/work"
 last_commit=""
 
-# Write verdict atomically so GitSync cannot consume a partly-written line.
+# Ghi verdict theo cách atomic để GitSync không đọc phải dòng dang dở.
 result() {
   commit="$1"
   status="$2"
@@ -36,8 +36,8 @@ result() {
   mv "${tmp}" "${RESULT}"
 }
 
-# Validate one immutable GitSync checkout.  Every failure is reported to the
-# requestor and returns normally so the controller can serve the next commit.
+# Validate một checkout GitSync bất biến. Mọi lỗi đều trả về cho bên yêu cầu;
+# controller vẫn tiếp tục chạy để xử lý commit kế tiếp.
 validate() {
   commit="$1"
   work="${ADC_DIR}/work/${PROFILE}-${commit}"
@@ -45,14 +45,14 @@ validate() {
   rm -rf "${work}"
   mkdir -p "${work}"
 
-  # Never validate an outdated request after GitSync has advanced its checkout.
+  # Không validate request cũ nếu GitSync đã chuyển sang checkout mới hơn.
   actual="$(git -C "${SYNC_SRC}" rev-parse HEAD 2>/dev/null || true)"
   if [ "${actual}" != "${commit}" ]; then
     result "${commit}" FAIL "checkout changed during validation"
     return
   fi
 
-  # Merge from the pulled source only.  samples/runtime must stay untouched.
+  # Chỉ merge từ source đã pull. samples/runtime tuyệt đối không bị ghi đè.
   if ! SKIP_SAMPLE_UPDATE=1 \
        DC_PROFILE="${PROFILE}" \
        sh "${SYNC_SRC}/scripts/runtime/merge-fragments.sh" \
@@ -62,13 +62,13 @@ validate() {
     return
   fi
 
-  # Build the validator's private APISIX view from the candidate checkout.
+  # Dựng private view APISIX của validator từ checkout candidate.
   cp "${SYNC_SRC}/apisix_config/config-${PROFILE}.yaml" \
      "/usr/local/apisix/conf/config-${PROFILE}.yaml"
   cp "${work}/apisix-${PROFILE}.yaml" \
      "/usr/local/apisix/conf/apisix-${PROFILE}.yaml"
 
-  # Replace only files inside this disposable ADC container, never host files.
+  # Chỉ thay file bên trong ADC container dùng một lần, không đụng file host.
   rm -rf /usr/local/apisix/apisix/plugins/custom \
          /usr/local/apisix/apisix/plugins/libraries
   ln -s "${SYNC_SRC}/plugins/custom" \
@@ -76,7 +76,7 @@ validate() {
   ln -s "${SYNC_SRC}/plugins/libraries" \
         /usr/local/apisix/apisix/plugins/libraries
 
-  # Keep the validator aligned with the production APISIX image overrides.
+  # Giữ validator đồng nhất với các file override của image APISIX production.
   for patch in vault config_yaml kafka-logger; do
     [ -f "/tmp/adc-patches/${patch}.lua" ] || continue
 
@@ -95,7 +95,7 @@ validate() {
     cp "/tmp/adc-patches/${patch}.lua" "${target}"
   done
 
-  # Compile every repo Lua plugin before APISIX attempts to load its schema.
+  # Compile mọi Lua plugin trong repo trước khi APISIX nạp schema của chúng.
   if ! find "${SYNC_SRC}/plugins" -type f -name '*.lua' -print0 \
        | sort -z \
        | xargs -0 -r -n1 /usr/local/openresty/luajit/bin/luajit -bl \
@@ -109,7 +109,7 @@ validate() {
     return
   fi
 
-  # Short, network-isolated boot: config_yaml loads entities and plugin schema.
+  # Boot ngắn trong network none: config_yaml nạp entity và plugin schema.
   if ! apisix start > "${work}/apisix-start.log" 2>&1; then
     result "${commit}" FAIL "apisix start failed"
     return
@@ -124,7 +124,7 @@ validate() {
     sleep 0.25
   done
 
-  # Stop the short-lived worker on both success and readiness failure.
+  # Dừng worker chạy ngắn ở cả trường hợp thành công và không ready.
   apisix quit > /dev/null 2>&1 || true
 
   if [ "${ready}" -ne 1 ]; then
@@ -132,14 +132,14 @@ validate() {
     return
   fi
 
-  # This artifact is proof of ADC success; GitSync retains cert-injected staging.
+  # Artifact này chứng minh ADC thành công; GitSync giữ staging đã inject cert.
   cp "${work}/apisix-${PROFILE}.yaml" "${APPROVED}"
   result "${commit}" PASS "validated"
 }
 
-# ── Controller loop ─────────────────────────────────────────────────────────
-# Re-reading the same request must not revalidate it every second.  A new SHA
-# becomes a new validation transaction.
+# ── Vòng lặp điều khiển ─────────────────────────────────────────────────────
+# Không validate lại cùng request mỗi giây. SHA mới tạo một transaction validate
+# mới.
 while :; do
   if [ -s "${REQUEST}" ]; then
     commit="$(cat "${REQUEST}" 2>/dev/null || true)"
