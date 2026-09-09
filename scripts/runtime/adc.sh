@@ -20,7 +20,7 @@ PROFILE="${DC_PROFILE:?DC_PROFILE is required}"
 
 REQUEST="${ADC_DIR}/request-${PROFILE}"
 RESULT="${ADC_DIR}/result-${PROFILE}"
-APPROVED="${ADC_DIR}/approved-${PROFILE}.yaml"
+HEARTBEAT="${ADC_DIR}/heartbeat-${PROFILE}"
 
 mkdir -p "${ADC_DIR}/work"
 last_commit=""
@@ -41,6 +41,8 @@ result() {
 validate() {
   commit="$1"
   work="${ADC_DIR}/work/${PROFILE}-${commit}"
+  # File chứng thực mang SHA để GitSync chỉ chấp nhận đúng transaction này.
+  approved="${ADC_DIR}/approved-${PROFILE}-${commit}.yaml"
 
   rm -rf "${work}"
   mkdir -p "${work}"
@@ -133,7 +135,7 @@ validate() {
   fi
 
   # Artifact này chứng minh ADC thành công; GitSync giữ staging đã inject cert.
-  cp "${work}/apisix-${PROFILE}.yaml" "${APPROVED}"
+  cp "${work}/apisix-${PROFILE}.yaml" "${approved}"
   result "${commit}" PASS "validated"
 }
 
@@ -141,6 +143,9 @@ validate() {
 # Không validate lại cùng request mỗi giây. SHA mới tạo một transaction validate
 # mới.
 while :; do
+  # Healthcheck dùng timestamp này để phát hiện controller bị treo.
+  date +%s > "${HEARTBEAT}"
+
   if [ -s "${REQUEST}" ]; then
     commit="$(cat "${REQUEST}" 2>/dev/null || true)"
 

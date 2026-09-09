@@ -90,7 +90,8 @@ services:
       - ./scripts/runtime/adc.sh:/usr/local/bin/vnpay-adc:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/vnpay-adc"]
     healthcheck:
-      test: ["CMD-SHELL", "test -d /tmp/adc"]
+      # Không chỉ kiểm tra mount tồn tại; controller phải cập nhật heartbeat.
+      test: ["CMD-SHELL", "test -f /tmp/adc/heartbeat-${DC_PROFILE} && test $$(( $$(date +%s) - $$(cat /tmp/adc/heartbeat-${DC_PROFILE}) )) -le 15"]
       interval: 15s
       timeout: 5s
       retries: 5

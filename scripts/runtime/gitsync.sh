@@ -6,7 +6,9 @@ set -eu
 SYNC_SRC="/tmp/sync/current"
 ROUTES_SRC="${SYNC_SRC}/apisix_routes"
 OUTPUT="/tmp/apisix_routes/apisix-${DC_PROFILE:-}.yaml"
-MERGE_SCRIPT="/tmp/scripts/runtime/merge-fragments.sh"
+# MERGE_SCRIPT="/tmp/scripts/runtime/merge-fragments.sh"
+# Dùng script trong đúng commit GitSync vừa pull để đồng nhất với ADC.
+MERGE_SCRIPT="${SYNC_SRC}/scripts/runtime/merge-fragments.sh"
 INJECT_SCRIPT="/tmp/scripts/runtime/inject-certs.sh"
 ADC_DIR="/tmp/adc"
 ADC_TIMEOUT="${ADC_TIMEOUT:-90}"
@@ -120,7 +122,8 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
   # ghi bind mount live. Request file được thay thế theo cách atomic.
   ADC_REQUEST="${ADC_DIR}/request-${DC_PROFILE}"
   ADC_RESULT="${ADC_DIR}/result-${DC_PROFILE}"
-  ADC_APPROVED="${ADC_DIR}/approved-${DC_PROFILE}.yaml"
+  # Artifact phải gắn với commit đang chờ validate, không dùng lại file cũ.
+  ADC_APPROVED="${ADC_DIR}/approved-${DC_PROFILE}-${COMMIT_HASH}.yaml"
 
   if [ ! -d "${ADC_DIR}" ]; then
     log_err "ERROR: ADC shared dir missing; live config unchanged"
@@ -128,6 +131,8 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     exit 1
   fi
 
+  # Xóa artifact cùng SHA nếu một lần chạy dang dở trước đó để lại.
+  rm -f "${ADC_APPROVED}"
   printf '%s\n' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
   mv "${ADC_REQUEST}.tmp.$$" "${ADC_REQUEST}"
   log "ADC validation requested: commit=${COMMIT_HASH}, timeout=${ADC_TIMEOUT}s"
