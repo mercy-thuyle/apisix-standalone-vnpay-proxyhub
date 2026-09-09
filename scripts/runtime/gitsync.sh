@@ -1,7 +1,19 @@
 #!/bin/sh
 
+# GitSync post-sync hook for APISIX standalone.
+#
+# The VM is the deployment boundary: GitSync pulls GitLab, creates a staging
+# route file, injects certificates, asks the separate VNPAY ADC container to
+# validate the pulled commit, and promotes only after PASS. The existing live
+# file remains unchanged on merge, certificate, ADC, or timeout failure.
+#
+# This script does not sync apisix_config/: those files are admin-managed and
+# restart-sensitive. It also uses cp (not mv) during promotion to preserve the
+# inode of the bind-mounted route file observed by APISIX.
+
 set -eu
 
+# ── Paths and runtime parameters ────────────────────────────────────────────
 SYNC_SRC="/tmp/sync/current"
 ROUTES_SRC="${SYNC_SRC}/apisix_routes"
 OUTPUT="/tmp/apisix_routes/apisix-${DC_PROFILE:-}.yaml"
@@ -26,6 +38,7 @@ log_err() {
   echo "$(date -Iseconds) ${_msg}" >> "${LOG_FILE}"
 }
 
+# Preserve stdout/stderr in the operational log and propagate the command rc.
 run_logged() {
   _rc_file="/tmp/.gitsync-run-logged-rc.$$"
   { "$@"; echo "$?" > "${_rc_file}"; } 2>&1 | tee -a "${LOG_FILE}"
@@ -34,7 +47,9 @@ run_logged() {
   return "${_rc}"
 }
 
-# ── Lock — chặn 2 lần gitsync.sh chạy chồng nhau nếu merge+inject lần trước chưa xong khi chu kỳ 30s tiếp theo tới
+# ── Single-run lock ─────────────────────────────────────────────────────────
+# GitSync runs every 30 seconds; ADC validation may take longer. Never allow
+# a later hook to overwrite this run's staging artifact or ADC request.
 LOCK_DIR="/tmp/.gitsync.lock"
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
   log_err "ERROR: lần chạy gitsync.sh trước (PID $(cat "${LOCK_DIR}/pid" 2>/dev/null || echo '?')) chưa xong — SKIP lần này để tránh ghi chồng lên STAGING đang dở"
@@ -43,8 +58,7 @@ fi
 echo "$$" > "${LOCK_DIR}/pid"
 trap 'rm -rf "${LOCK_DIR}"' EXIT
 
-
-# ── Kiểm tra DC_PROFILE ──────────────────────────────────────────────────────
+# ── Required profile and source revision ────────────────────────────────────
 if [ -z "${DC_PROFILE:-}" ]; then
   log_err "ERROR: DC_PROFILE chưa được set trong .env"
   exit 1
@@ -54,7 +68,6 @@ OUTPUT="/tmp/apisix_routes/apisix-${DC_PROFILE}.yaml"
 
 COMMIT_HASH="unknown"
 COMMIT_MSG="unknown"
-#if which git > /dev/null 2>&1; then
 if git -C "${SYNC_SRC}" rev-parse HEAD > /dev/null 2>&1; then
   COMMIT_HASH=$(git -C "${SYNC_SRC}" rev-parse HEAD 2>/dev/null || echo "unknown")
   COMMIT_MSG=$(git -C "${SYNC_SRC}" log -1 --pretty=format:"%s" 2>/dev/null || echo "unknown")
@@ -62,10 +75,8 @@ fi
 
 log "START — DC_PROFILE=${DC_PROFILE} | commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}"
 
-if [ -d "${ROUTES_SRC}/upstreams" ] && \
-   [ -d "${ROUTES_SRC}/routes" ]   && \
-   [ -d "${ROUTES_SRC}/services" ] && \
-   [ -d "${ROUTES_SRC}/ssls" ]; then
+# ── Fragment layout: merge → inject → ADC gate → promote ───────────────────
+if [ -d "${ROUTES_SRC}/upstreams" ] &&    [ -d "${ROUTES_SRC}/routes" ] &&    [ -d "${ROUTES_SRC}/services" ] &&    [ -d "${ROUTES_SRC}/ssls" ]; then
 
   log "Layout: fragments (core: upstreams/ routes/ services/ ssls/; tùy chọn: plugin_metadata/ plugin_configs/ global_rules/ consumer_groups/ consumers/)"
 
@@ -75,27 +86,27 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
   fi
 
   MERGE_LOG_START=$(wc -l < "${LOG_FILE}" 2>/dev/null || echo 0)
-
   STAGING="${OUTPUT}.staging"
 
   if ! run_logged "${MERGE_SCRIPT}" "${ROUTES_SRC}" "${STAGING}"; then
     MERGE_ERRORS=$(tail -n +"$((MERGE_LOG_START + 1))" "${LOG_FILE}" 2>/dev/null | grep '\[merge-fragments\] ERROR' || true)
     log_err "ERROR: merge-fragments.sh thất bại — output không thay đổi"
+
     if [ -n "${MERGE_ERRORS}" ]; then
-      printf '%s\n' "${MERGE_ERRORS}" | while IFS= read -r eline; do
+      printf '%s
+' "${MERGE_ERRORS}" | while IFS= read -r eline; do
         log_err "  → nguyên nhân: ${eline}"
       done
     fi
+
     rm -f "${STAGING}"
     exit 1
   fi
 
+  # Certificate injection is part of the staging transaction, never live I/O.
   INJECT_OK=1
   if [ -f "${INJECT_SCRIPT}" ]; then
-    if ! OUTPUT="${STAGING}" \
-       CERTS_DIR="/tmp/certs" \
-       DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt" \
-       run_logged sh "${INJECT_SCRIPT}"; then
+    if ! OUTPUT="${STAGING}"          CERTS_DIR="/tmp/certs"          DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt"          run_logged sh "${INJECT_SCRIPT}"; then
       INJECT_OK=0
     fi
   else
@@ -109,55 +120,69 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     exit 1
   fi
 
-  # Gate: GitSync đã pull candidate nhưng chưa được phép ghi file live. ADC là
-  # service riêng, không cần/không được cấp Docker socket cho git-sync.
+  # ADC validates the same GitSync checkout but has no Docker socket and cannot
+  # write the live bind mount. The request file is atomically replaced.
   ADC_REQUEST="${ADC_DIR}/request-${DC_PROFILE}"
   ADC_RESULT="${ADC_DIR}/result-${DC_PROFILE}"
   ADC_APPROVED="${ADC_DIR}/approved-${DC_PROFILE}.yaml"
-  [ -d "${ADC_DIR}" ] || { log_err "ERROR: ADC shared dir missing; live config unchanged"; rm -f "${STAGING}"; exit 1; }
-  printf '%s\n' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
+
+  if [ ! -d "${ADC_DIR}" ]; then
+    log_err "ERROR: ADC shared dir missing; live config unchanged"
+    rm -f "${STAGING}"
+    exit 1
+  fi
+
+  printf '%s
+' "${COMMIT_HASH}" > "${ADC_REQUEST}.tmp.$$"
   mv "${ADC_REQUEST}.tmp.$$" "${ADC_REQUEST}"
   log "ADC validation requested: commit=${COMMIT_HASH}, timeout=${ADC_TIMEOUT}s"
-  ADC_ELAPSED=0; ADC_STATUS=""; ADC_DETAIL=""
+
+  ADC_ELAPSED=0
+  ADC_STATUS=""
+  ADC_DETAIL=""
+
   while [ "${ADC_ELAPSED}" -lt "${ADC_TIMEOUT}" ]; do
     if [ -f "${ADC_RESULT}" ]; then
       ADC_LINE=$(cat "${ADC_RESULT}" 2>/dev/null || true)
       ADC_COMMIT=$(printf '%s' "${ADC_LINE}" | cut -f1)
       ADC_STATUS=$(printf '%s' "${ADC_LINE}" | cut -f2)
       ADC_DETAIL=$(printf '%s' "${ADC_LINE}" | cut -f3-)
+
+      # Ignore a verdict left behind by an earlier GitSync commit.
       [ "${ADC_COMMIT}" = "${COMMIT_HASH}" ] && break
     fi
-    sleep 1; ADC_ELAPSED=$((ADC_ELAPSED + 1))
+
+    sleep 1
+    ADC_ELAPSED=$((ADC_ELAPSED + 1))
   done
+
+  # The proof file requires a successful configuration artifact in addition to
+  # a matching PASS verdict.
   if [ "${ADC_STATUS}" != "PASS" ] || [ ! -s "${ADC_APPROVED}" ]; then
     log_err "ERROR: ADC verdict for ${COMMIT_HASH}: ${ADC_STATUS:-TIMEOUT} ${ADC_DETAIL}; live config unchanged"
     rm -f "${STAGING}"
     exit 1
   fi
-  # STAGING là output đã qua inject-certs ở trên; không copy artifact ADC đè
-  # lên đây vì ADC chủ đích chỉ validate source/merge trong network none.
-  log "ADC PASS: promoting injected staging artifact for ${COMMIT_HASH}"
 
+  # ADC validates source/merge in network none; it must not replace the
+  # certificate-injected staging artifact prepared above.
+  log "ADC PASS: promoting injected staging artifact for ${COMMIT_HASH}"
   cp "${STAGING}" "${OUTPUT}"
   rm -f "${STAGING}"
 
-  if grep -q "<<THAY" "${OUTPUT}" 2>/dev/null || grep -q "CHANGE_ME" "${OUTPUT}" 2>/dev/null; then
+  if grep -q "<<THAY" "${OUTPUT}" 2>/dev/null ||      grep -q "CHANGE_ME" "${OUTPUT}" 2>/dev/null; then
     log "INFO: Output còn credential placeholder — cần inject apikey cho apisix_routes/consumers/ trước khi sử dụng"
   fi
 
   if grep -q "^plugin_metadata:" "${OUTPUT}" 2>/dev/null; then
-    PM_IDS=$(sed -n '/^plugin_metadata:/,/^upstreams:/p' "${OUTPUT}" \
-             | grep -E '^\s+-\s+id:' \
-             | sed 's/.*id:[[:space:]]*//' \
-             | sed 's/[[:space:]]*#.*//' \
-             | tr -d '"' \
-             | sed 's/[[:space:]]*$//' \
-             | tr '\n' ',' | sed 's/,$//')
+    PM_IDS=$(sed -n '/^plugin_metadata:/,/^upstreams:/p' "${OUTPUT}"              | grep -E '^\s+-\s+id:'              | sed 's/.*id:[[:space:]]*//'              | sed 's/[[:space:]]*#.*//'              | tr -d '"'              | sed 's/[[:space:]]*$//'              | tr '
+' ',' | sed 's/,$//')
     log "INFO: plugin_metadata đang active cho plugin: ${PM_IDS:-?} — áp dụng GLOBAL cho mọi route/service dùng plugin đó, không phải chỉ route gắn global_rules."
   else
     log "INFO: Không có plugin_metadata (bỏ qua — tùy chọn, log_format các logger dùng schema mặc định của plugin)"
   fi
 
+# ── Legacy layout: retain the pre-ADC behaviour ─────────────────────────────
 elif [ -f "${ROUTES_SRC}/apisix-${DC_PROFILE}.yaml" ]; then
 
   log "Layout: legacy (apisix-${DC_PROFILE}.yaml)"
@@ -174,10 +199,7 @@ elif [ -f "${ROUTES_SRC}/apisix-${DC_PROFILE}.yaml" ]; then
   fi
 
   if [ -f "${INJECT_SCRIPT}" ]; then
-    OUTPUT="${OUTPUT}" \
-    CERTS_DIR="/tmp/certs" \
-    DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt" \
-    run_logged sh "${INJECT_SCRIPT}"
+    OUTPUT="${OUTPUT}"     CERTS_DIR="/tmp/certs"     DOMAINS_FILE="/tmp/scripts/libraries/cert-list-domains.txt"     run_logged sh "${INJECT_SCRIPT}"
   fi
   # echo "[gitsync] Cert injection: skipped (using Vault secret provider)"
 
@@ -188,6 +210,7 @@ else
   exit 1
 fi
 
+# ── Runtime assets synchronized after route promotion ───────────────────────
 log "Syncing plugins/..."
 if [ -d "${SYNC_SRC}/plugins" ]; then
   cp -r "${SYNC_SRC}/plugins/." "/tmp/plugins/"
@@ -204,26 +227,14 @@ else
   log_err "WARN: ${SYNC_SRC}/scripts/ không tồn tại, bỏ qua"
 fi
 
-# # ── 4. Sync apisix_config/ ─────────────────────────────────────────────────
-# Tắt — admin quản lý tay. Bỏ comment khi muốn auto sync.
-# Lưu ý: config.yaml KHÔNG hot-reload → đổi file này luôn phải restart container.
-# echo "[gitsync] Syncing apisix_config/..."
+# ── Intentionally disabled: admin-managed, restart-sensitive configuration ──
 # if [ -d "${SYNC_SRC}/apisix_config" ]; then
 #   cp -r "${SYNC_SRC}/apisix_config/." "/tmp/apisix_config/"
-#   echo "[gitsync] apisix_config/ synced — cần restart APISIX để apply"
-# else
-#   echo "[gitsync] WARN: ${SYNC_SRC}/apisix_config/ không tồn tại, bỏ qua" >&2
+#   log "apisix_config synced — cần restart APISIX để apply"
 # fi
 
-# # ── docker-compose ─────────────────────────────────────────────────
-# # cp ${SYNC_SRC}docker-compose.yaml /tmp/docker-compose.yaml
-
-# # ── Certs ──────────────────────────────────────────────────
-# Chỉ sync .cert (plaintext public) và .key.enc (encrypted private key)
-# KHÔNG sync .key (plaintext private key — không tồn tại trong repo)
-# certs — gitsync tự quản trong /tmp/sync/current/certs/
-# 2-decrypt-certs.sh đọc thẳng từ đó, không cần copy ra ngoài
+# Certificates remain managed from /tmp/sync/current/certs/:
+# sync only public .cert and encrypted .key.enc, never plaintext private .key.
 
 log " >DONE — commit=${COMMIT_HASH}"
-
 echo "[gitsync] $(date -Iseconds) — gitsync đã pull + merge xong (commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}), APISIX sẽ tự hot-reload routes trong vài giây tới (config_yaml.lua tự detect file đổi). Đối chiếu bằng: docker logs apisix-standalone --tail 30 | grep reloaded" >> "${LOG_FILE}"
