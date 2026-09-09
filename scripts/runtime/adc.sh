@@ -2,13 +2,13 @@
 
 # VNPAY ADC (APISIX dry-run controller)
 #
-# GitSync writes a commit SHA to /tmp/adc/request-<profile>. This long-running
+# GitSync writes a commit SHA to /tmp/adc/request-<profile>.  This long-running
 # container validates that exact checkout without network access, then writes
 # one atomic verdict line to /tmp/adc/result-<profile>:
-#   <commit>	PASS|FAIL	<detail>
+#   <commit>\tPASS|FAIL\t<detail>
 #
 # A PASS also creates approved-<profile>.yaml as proof that the candidate was
-# merged and accepted by APISIX. GitSync is the only component that promotes
+# merged and accepted by APISIX.  GitSync is the only component that promotes
 # its own injected staging file to the live bind-mounted route file.
 
 set -eu
@@ -32,12 +32,11 @@ result() {
   detail="$3"
   tmp="${RESULT}.tmp.$$"
 
-  printf '%s	%s	%s
-' "${commit}" "${status}" "${detail}" > "${tmp}"
+  printf '%s\t%s\t%s\n' "${commit}" "${status}" "${detail}" > "${tmp}"
   mv "${tmp}" "${RESULT}"
 }
 
-# Validate one immutable GitSync checkout. Every failure is reported to the
+# Validate one immutable GitSync checkout.  Every failure is reported to the
 # requestor and returns normally so the controller can serve the next commit.
 validate() {
   commit="$1"
@@ -53,20 +52,29 @@ validate() {
     return
   fi
 
-  # Merge from the pulled source only. samples/runtime must stay untouched.
-  if ! SKIP_SAMPLE_UPDATE=1        DC_PROFILE="${PROFILE}"        sh "${SYNC_SRC}/scripts/runtime/merge-fragments.sh"        "${SYNC_SRC}/apisix_routes"        "${work}/apisix-${PROFILE}.yaml" > "${work}/merge.log" 2>&1; then
+  # Merge from the pulled source only.  samples/runtime must stay untouched.
+  if ! SKIP_SAMPLE_UPDATE=1 \
+       DC_PROFILE="${PROFILE}" \
+       sh "${SYNC_SRC}/scripts/runtime/merge-fragments.sh" \
+       "${SYNC_SRC}/apisix_routes" \
+       "${work}/apisix-${PROFILE}.yaml" > "${work}/merge.log" 2>&1; then
     result "${commit}" FAIL "merge failed"
     return
   fi
 
   # Build the validator's private APISIX view from the candidate checkout.
-  cp "${SYNC_SRC}/apisix_config/config-${PROFILE}.yaml"      "/usr/local/apisix/conf/config-${PROFILE}.yaml"
-  cp "${work}/apisix-${PROFILE}.yaml"      "/usr/local/apisix/conf/apisix-${PROFILE}.yaml"
+  cp "${SYNC_SRC}/apisix_config/config-${PROFILE}.yaml" \
+     "/usr/local/apisix/conf/config-${PROFILE}.yaml"
+  cp "${work}/apisix-${PROFILE}.yaml" \
+     "/usr/local/apisix/conf/apisix-${PROFILE}.yaml"
 
   # Replace only files inside this disposable ADC container, never host files.
-  rm -rf /usr/local/apisix/apisix/plugins/custom          /usr/local/apisix/apisix/plugins/libraries
-  ln -s "${SYNC_SRC}/plugins/custom"         /usr/local/apisix/apisix/plugins/custom
-  ln -s "${SYNC_SRC}/plugins/libraries"         /usr/local/apisix/apisix/plugins/libraries
+  rm -rf /usr/local/apisix/apisix/plugins/custom \
+         /usr/local/apisix/apisix/plugins/libraries
+  ln -s "${SYNC_SRC}/plugins/custom" \
+        /usr/local/apisix/apisix/plugins/custom
+  ln -s "${SYNC_SRC}/plugins/libraries" \
+        /usr/local/apisix/apisix/plugins/libraries
 
   # Keep the validator aligned with the production APISIX image overrides.
   for patch in vault config_yaml kafka-logger; do
@@ -88,7 +96,10 @@ validate() {
   done
 
   # Compile every repo Lua plugin before APISIX attempts to load its schema.
-  if ! find "${SYNC_SRC}/plugins" -type f -name '*.lua' -print0        | sort -z        | xargs -0 -r -n1 /usr/local/openresty/luajit/bin/luajit -bl          > /dev/null; then
+  if ! find "${SYNC_SRC}/plugins" -type f -name '*.lua' -print0 \
+       | sort -z \
+       | xargs -0 -r -n1 /usr/local/openresty/luajit/bin/luajit -bl \
+         > /dev/null; then
     result "${commit}" FAIL "Lua syntax failed"
     return
   fi
@@ -127,7 +138,7 @@ validate() {
 }
 
 # ── Controller loop ─────────────────────────────────────────────────────────
-# Re-reading the same request must not revalidate it every second. A new SHA
+# Re-reading the same request must not revalidate it every second.  A new SHA
 # becomes a new validation transaction.
 while :; do
   if [ -s "${REQUEST}" ]; then
