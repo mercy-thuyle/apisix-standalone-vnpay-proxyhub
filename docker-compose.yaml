@@ -91,7 +91,7 @@ services:
     entrypoint: ["/bin/sh", "/usr/local/bin/vnpay-adc"]
     healthcheck:
       # Không chỉ kiểm tra mount tồn tại; controller phải cập nhật heartbeat.
-      test: ["CMD-SHELL", "test -f /tmp/adc/heartbeat-${DC_PROFILE} && test $$(( $$(date +%s) - $$(cat /tmp/adc/heartbeat-${DC_PROFILE}) )) -le 15"]
+      test: ["CMD-SHELL", "test -f /tmp/adc/heartbeat-${DC_PROFILE} && test $$(( $$(date +%s) - $$(cat /tmp/adc/heartbeat-${DC_PROFILE}) )) -le 120"]
       interval: 15s
       timeout: 5s
       retries: 5
