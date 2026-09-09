@@ -1,19 +1,19 @@
 #!/bin/sh
 
-# GitSync post-sync hook for APISIX standalone.
+# GitSync hook chạy sau đồng bộ cho APISIX standalone.
 #
-# The VM is the deployment boundary: GitSync pulls GitLab, creates a staging
-# route file, injects certificates, asks the separate VNPAY ADC container to
-# validate the pulled commit, and promotes only after PASS.  The existing live
-# file remains unchanged on merge, certificate, ADC, or timeout failure.
+# VM là ranh giới triển khai: GitSync pull GitLab, tạo file route staging, inject
+# certificate, yêu cầu container VNPAY ADC riêng validate commit đã pull, và chỉ
+# promote sau khi PASS. File live hiện hữu không đổi khi merge, certificate, ADC
+# hoặc timeout thất bại.
 #
-# This script does not sync apisix_config/: those files are admin-managed and
-# restart-sensitive.  It also uses cp (not mv) during promotion to preserve the
-# inode of the bind-mounted route file observed by APISIX.
+# Script này không sync apisix_config/: các file này do admin quản lý và nhạy cảm
+# với restart. Khi promote phải dùng cp (không dùng mv) để giữ inode file route
+# bind mount mà APISIX đang theo dõi.
 
 set -eu
 
-# ── Paths and runtime parameters ────────────────────────────────────────────
+# ── Đường dẫn và tham số runtime ────────────────────────────────────────────
 SYNC_SRC="/tmp/sync/current"
 ROUTES_SRC="${SYNC_SRC}/apisix_routes"
 OUTPUT="/tmp/apisix_routes/apisix-${DC_PROFILE:-}.yaml"
@@ -38,7 +38,7 @@ log_err() {
   echo "$(date -Iseconds) ${_msg}" >> "${LOG_FILE}"
 }
 
-# Preserve stdout/stderr in the operational log and propagate the command rc.
+# Giữ stdout/stderr trong operational log và trả đúng exit code của lệnh.
 run_logged() {
   _rc_file="/tmp/.gitsync-run-logged-rc.$$"
   { "$@"; echo "$?" > "${_rc_file}"; } 2>&1 | tee -a "${LOG_FILE}"
@@ -47,9 +47,9 @@ run_logged() {
   return "${_rc}"
 }
 
-# ── Single-run lock ─────────────────────────────────────────────────────────
-# GitSync runs every 30 seconds; ADC validation may take longer.  Never allow
-# a later hook to overwrite this run's staging artifact or ADC request.
+# ── Lock một lần chạy ───────────────────────────────────────────────────────
+# GitSync chạy mỗi 30 giây, ADC validate có thể lâu hơn. Không để hook chạy sau
+# ghi đè staging artifact hoặc ADC request của lần đang chạy.
 LOCK_DIR="/tmp/.gitsync.lock"
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
   log_err "ERROR: lần chạy gitsync.sh trước (PID $(cat "${LOCK_DIR}/pid" 2>/dev/null || echo '?')) chưa xong — SKIP lần này để tránh ghi chồng lên STAGING đang dở"
@@ -58,7 +58,7 @@ fi
 echo "$$" > "${LOCK_DIR}/pid"
 trap 'rm -rf "${LOCK_DIR}"' EXIT
 
-# ── Required profile and source revision ────────────────────────────────────
+# ── Kiểm tra profile và source revision ─────────────────────────────────────
 if [ -z "${DC_PROFILE:-}" ]; then
   log_err "ERROR: DC_PROFILE chưa được set trong .env"
   exit 1
@@ -75,7 +75,7 @@ fi
 
 log "START — DC_PROFILE=${DC_PROFILE} | commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}"
 
-# ── Fragment layout: merge → inject → ADC gate → promote ───────────────────
+# ── Bố cục fragments: merge → inject → ADC gate → promote ──────────────────
 if [ -d "${ROUTES_SRC}/upstreams" ] && \
    [ -d "${ROUTES_SRC}/routes" ] && \
    [ -d "${ROUTES_SRC}/services" ] && \
@@ -105,7 +105,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     exit 1
   fi
 
-  # Certificate injection is part of the staging transaction, never live I/O.
+  # Inject certificate là một phần của transaction staging, không ghi live.
   INJECT_OK=1
   if [ -f "${INJECT_SCRIPT}" ]; then
     if ! OUTPUT="${STAGING}" \
@@ -125,8 +125,8 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     exit 1
   fi
 
-  # ADC validates the same GitSync checkout but has no Docker socket and cannot
-  # write the live bind mount.  The request file is atomically replaced.
+  # ADC validate cùng GitSync checkout nhưng không có Docker socket và không thể
+  # ghi bind mount live. Request file được thay thế theo cách atomic.
   ADC_REQUEST="${ADC_DIR}/request-${DC_PROFILE}"
   ADC_RESULT="${ADC_DIR}/result-${DC_PROFILE}"
   ADC_APPROVED="${ADC_DIR}/approved-${DC_PROFILE}.yaml"
@@ -152,7 +152,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
       ADC_STATUS=$(printf '%s' "${ADC_LINE}" | cut -f2)
       ADC_DETAIL=$(printf '%s' "${ADC_LINE}" | cut -f3-)
 
-      # Ignore a verdict left behind by an earlier GitSync commit.
+      # Bỏ qua verdict còn sót lại từ commit GitSync trước đó.
       [ "${ADC_COMMIT}" = "${COMMIT_HASH}" ] && break
     fi
 
@@ -160,16 +160,15 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     ADC_ELAPSED=$((ADC_ELAPSED + 1))
   done
 
-  # The proof file requires a successful configuration artifact in addition to
-  # a matching PASS verdict.
+  # File chứng thực yêu cầu có cấu hình thành công, ngoài PASS verdict khớp.
   if [ "${ADC_STATUS}" != "PASS" ] || [ ! -s "${ADC_APPROVED}" ]; then
     log_err "ERROR: ADC verdict for ${COMMIT_HASH}: ${ADC_STATUS:-TIMEOUT} ${ADC_DETAIL}; live config unchanged"
     rm -f "${STAGING}"
     exit 1
   fi
 
-  # ADC validates source/merge in network none; it must not replace the
-  # certificate-injected staging artifact prepared above.
+  # ADC validate source/merge trong network none; không được thay file staging
+  # đã inject certificate ở trên.
   log "ADC PASS: promoting injected staging artifact for ${COMMIT_HASH}"
   cp "${STAGING}" "${OUTPUT}"
   rm -f "${STAGING}"
@@ -192,7 +191,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     log "INFO: Không có plugin_metadata (bỏ qua — tùy chọn, log_format các logger dùng schema mặc định của plugin)"
   fi
 
-# ── Legacy layout: retain the pre-ADC behaviour ─────────────────────────────
+# ── Legacy layout: giữ nguyên hành vi trước ADC ──────────────────────────────
 elif [ -f "${ROUTES_SRC}/apisix-${DC_PROFILE}.yaml" ]; then
 
   log "Layout: legacy (apisix-${DC_PROFILE}.yaml)"
@@ -223,7 +222,7 @@ else
   exit 1
 fi
 
-# ── Runtime assets synchronized after route promotion ────────────────────────
+# ── Đồng bộ tài nguyên runtime sau khi promote route ─────────────────────────
 log "Syncing plugins/..."
 if [ -d "${SYNC_SRC}/plugins" ]; then
   cp -r "${SYNC_SRC}/plugins/." "/tmp/plugins/"
@@ -240,14 +239,14 @@ else
   log_err "WARN: ${SYNC_SRC}/scripts/ không tồn tại, bỏ qua"
 fi
 
-# ── Intentionally disabled: admin-managed, restart-sensitive configuration ──
+# ── Cố ý tắt: cấu hình do admin quản lý, nhạy cảm với restart ────────────────
 # if [ -d "${SYNC_SRC}/apisix_config" ]; then
 #   cp -r "${SYNC_SRC}/apisix_config/." "/tmp/apisix_config/"
 #   log "apisix_config synced — cần restart APISIX để apply"
 # fi
 
-# Certificates remain managed from /tmp/sync/current/certs/:
-# sync only public .cert and encrypted .key.enc, never plaintext private .key.
+# Certificate tiếp tục được quản lý tại /tmp/sync/current/certs/:
+# chỉ sync .cert public và .key.enc đã mã hóa, không bao giờ sync .key plaintext.
 
 log " >DONE — commit=${COMMIT_HASH}"
 echo "[gitsync] $(date -Iseconds) — gitsync đã pull + merge xong (commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}), APISIX sẽ tự hot-reload routes trong vài giây tới (config_yaml.lua tự detect file đổi). Đối chiếu bằng: docker logs apisix-standalone --tail 30 | grep reloaded" >> "${LOG_FILE}"
