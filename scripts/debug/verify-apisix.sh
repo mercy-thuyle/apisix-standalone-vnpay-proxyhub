@@ -204,6 +204,7 @@ run_pre_apply() {
       -e 'SKIP_SAMPLE_UPDATE=1' \
       -e 'VAULT_ADDR=http://127.0.0.1:8200' \
       -e 'VAULT_TOKEN=dry-run-not-a-secret' \
+      -e 'KAFKA_SASL_PASSWORD=adc-dry-run-not-a-secret' \
       -v "${base_dir}:/workspace:ro" \
       -v "${tmp_dir}:/dry-run" \
       --entrypoint /bin/sh \

@@ -80,7 +80,9 @@ services:
       - DC_PROFILE=${DC_PROFILE}
       - APISIX_PROFILE=${DC_PROFILE}
       - VAULT_ADDR=http://127.0.0.1:8200
+      # Chỉ để APISIX render biến môi trường khi dry-run; không phải secret thật.
       - VAULT_TOKEN=adc-dry-run-not-a-secret
+      - KAFKA_SASL_PASSWORD=adc-dry-run-not-a-secret
     volumes:
       - ./gitsync:/tmp/sync:ro
       - ./adc:/tmp/adc
