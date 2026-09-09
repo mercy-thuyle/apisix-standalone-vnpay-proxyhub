@@ -6,7 +6,8 @@ routes:
     service_id: "service-upstream-maas-logs"
     uri: "/*"
     hosts:
-      - "sb-logs-observe.infiniband.vn"
+      # - "sb-logs-observe.infiniband.vn"
+      - "maas-service-logs.infiniband.vn"
     timeout:
       connect: 60
       send: 600
@@ -19,7 +20,8 @@ routes:
     service_id: "service-upstream-maas-metrics"
     uri: "/*"
     hosts:
-      - "sb-metrics-observe.infiniband.vn"
+      # - "sb-metrics-observe.infiniband.vn"
+      - "maas-service-metrics.infiniband.vn"
     timeout:
       connect: 60
       send: 600

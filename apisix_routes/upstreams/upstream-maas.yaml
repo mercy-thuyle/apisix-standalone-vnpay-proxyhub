@@ -16,7 +16,6 @@ upstreams:
       active:
         type: "https"
         # host: "maas-service-logs.infiniband.vn"
-        host: "cmc.sds.infiniband.vn"
         http_path: "/"
         https_verify_certificate: false
         req_headers:
