@@ -184,7 +184,6 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
      log_err "ERROR: ADC verdict for ${COMMIT_HASH}: ${ADC_STATUS:-TIMEOUT} ${ADC_DETAIL}; live config unchanged"
     log_err "BLOCKED — ghi ${ADC_BLOCKED}; cùng SHA sẽ fail nhanh, SHA mới vẫn được validate"
     rm -f "${STAGING}"
-    rm -f "${ADC_BLOCKED}"
     exit 1
   fi
 
@@ -193,6 +192,7 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
   log "ADC PASS: promoting injected staging artifact for ${COMMIT_HASH}"
   cp "${STAGING}" "${OUTPUT}"
   rm -f "${STAGING}"
+  rm -f "${ADC_BLOCKED}"
 
   if grep -q "<<THAY" "${OUTPUT}" 2>/dev/null || grep -q "CHANGE_ME" "${OUTPUT}" 2>/dev/null; then
     log "INFO: Output còn credential placeholder — cần inject apikey cho apisix_routes/consumers/ trước khi sử dụng"

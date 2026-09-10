@@ -172,7 +172,9 @@ validate() {
   # Không chỉ dựa vào PID worker: schema route/plugin sai vẫn có thể xuất hiện sau khi Nginx đã start thành công.
   # Worker chạy không đồng nghĩa declarative config hợp lệ.
   # Chờ ít nhất một chu kỳ config_yaml rồi kiểm tra lỗi schema/YAML từ candidate này.
-  sleep "${ADC_CONFIG_SETTLE_SECONDS:-3}"
+  # config_yaml.lua của stack này có chu kỳ tối đa 30s. Chờ dài hơn một chu kỳ
+  # để schema route/plugin được nạp thật trước khi ADC có thể trả PASS.
+  sleep "${ADC_CONFIG_SETTLE_SECONDS:-35}"
 
   if grep -Eq \
       'config_yaml\.lua:.*(failed to check item data|failed to load|failed to parse)' \
