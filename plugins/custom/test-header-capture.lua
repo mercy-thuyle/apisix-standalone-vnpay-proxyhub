@@ -30,4 +30,4 @@ function _M.rewrite(conf, ctx)
                   conf.header_name, "=", value or "<missing>")
 end
 
-return _M(
+return _M
