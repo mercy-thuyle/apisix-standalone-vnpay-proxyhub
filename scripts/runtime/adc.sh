@@ -192,7 +192,11 @@ validate() {
   wait "${apisix_start_pid}" 2>/dev/null || true
 
   # Artifact này chứng minh ADC thành công; GitSync giữ staging đã inject cert.
-  cp "${work}/apisix-${PROFILE}.yaml" "${approved}"
+  if ! cp "${work}/apisix-${PROFILE}.yaml" "${approved}" ||
+     [ ! -s "${approved}" ]; then
+    result "${commit}" FAIL "ADC approval artifact write failed"
+    return
+  fi
   result "${commit}" PASS "validated"
 }
 

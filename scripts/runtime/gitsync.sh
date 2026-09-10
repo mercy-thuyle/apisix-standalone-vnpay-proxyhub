@@ -77,9 +77,11 @@ if [ -s "${ADC_BLOCKED}" ]; then
   BLOCK_DETAIL=$(printf '%s' "${BLOCK_LINE}" | cut -f3-)
 
   if [ "${BLOCK_COMMIT}" = "${COMMIT_HASH}" ]; then
-    log_err "BLOCKED — ADC đã từ chối commit=${COMMIT_HASH}: ${BLOCK_STATUS:-FAIL} ${BLOCK_DETAIL}; live config unchanged"
-    exit 1
-  fi
+    # Không trả exit 1: git-sync sẽ retry exechook mỗi 5s vô hạn.
+    # Exit 0 chỉ xác nhận hook đã xử lý trạng thái BLOCKED; tuyệt đối không
+    # merge/inject/promote file live. Chu kỳ poll sau vẫn nhận SHA mới để sửa.
+    log "BLOCKED — commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}: ${BLOCK_STATUS:-FAIL} ${BLOCK_DETAIL}; bỏ qua apply, chờ SHA mới"
+    exit 0  fi
 fi
 
 # ── Bố cục fragments: merge → inject → ADC gate → promote ──────────────────
@@ -173,8 +175,14 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
     ADC_ELAPSED=$((ADC_ELAPSED + 1))
   done
 
-  # File chứng thực yêu cầu có cấu hình thành công, ngoài PASS verdict khớp.
-  if [ "${ADC_STATUS}" != "PASS" ] || [ ! -s "${ADC_APPROVED}" ]; then
+  # PASS chỉ hợp lệ khi ADC đã tạo artifact chứng thực cùng SHA.
+  # Chuẩn hóa trạng thái để không ghi marker kiểu "PASS nhưng bị block".
+  if [ "${ADC_STATUS}" = "PASS" ] && [ ! -s "${ADC_APPROVED}" ]; then
+    ADC_STATUS="FAIL"
+    ADC_DETAIL="ADC approval artifact missing"
+  fi
+
+  if [ "${ADC_STATUS}" != "PASS" ]; then
     ADC_BLOCK_TMP="${ADC_BLOCKED}.tmp.$$"
     printf '%s\t%s\t%s\n' \
       "${COMMIT_HASH}" "${ADC_STATUS:-TIMEOUT}" "${ADC_DETAIL}" \
