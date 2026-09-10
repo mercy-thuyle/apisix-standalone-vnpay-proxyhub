@@ -11,6 +11,5 @@ routes:
       ip-restriction:
         blacklist:
           - "203.0.113.10"
-        # blacklist: []
       custom.test-header-capture:
         header_name: "X-ADC-Test"
