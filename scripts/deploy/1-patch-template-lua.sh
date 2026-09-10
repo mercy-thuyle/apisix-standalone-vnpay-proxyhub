@@ -86,7 +86,30 @@ cp "${DEPLOY_DIR}/config_yaml.lua.orig" "${DEPLOY_DIR}/config_yaml.lua"
 
 OLD_MSG='log.warn("config file ", config_file.path, " reloaded.")'
 NEW_MSG='log.warn("[APISIX LIVE-RELOAD OK] yaml=", config_file.path, " | source=gitsync | entities=routes/plugin_configs/services/upstreams/consumers/ssls | config.yaml requires container restart | validation/promote status: check logs/adc/adc.log + logs/gitsync/gitsync.log -> Verify: tail -F logs/apisix/error.log logs/adc/adc.log logs/gitsync/gitsync.log")'
-sed -i "s|${OLD_MSG}|${NEW_MSG}|" "${DEPLOY_DIR}/config_yaml.lua"
+# sed -i "s|${OLD_MSG}|${NEW_MSG}|" "${DEPLOY_DIR}/config_yaml.lua"
+export OLD_MSG NEW_MSG
+python3 - "${DEPLOY_DIR}/config_yaml.lua" <<'PYEOF'
+import os
+import sys
+
+path = sys.argv[1]
+old = os.environ["OLD_MSG"]
+new = os.environ["NEW_MSG"]
+
+with open(path) as f:
+    content = f.read()
+
+matches = content.count(old)
+if matches != 1:
+    print(
+        f"ERROR: config_yaml.lua anchor matched {matches} times (expected 1)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+with open(path, "w") as f:
+    f.write(content.replace(old, new))
+PYEOF
 
 echo "  diff:"
 diff "${DEPLOY_DIR}/config_yaml.lua.orig" "${DEPLOY_DIR}/config_yaml.lua" || true
