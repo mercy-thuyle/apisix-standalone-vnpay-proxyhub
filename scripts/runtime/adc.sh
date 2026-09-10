@@ -56,20 +56,22 @@ validate() {
   work="${ADC_DIR}/work/${PROFILE}-${commit}"
   # File chứng thực mang SHA để GitSync chỉ chấp nhận đúng transaction này.
   approved="${ADC_DIR}/approved-${PROFILE}-${commit}.yaml"
+  ADC_ERROR_LOG="${work}/error.log"
 
   rm -rf "${work}"
   mkdir -p "${work}"
+  : > "${ADC_ERROR_LOG}"
   log "START — commit=${commit} work=${work}"
 
-# GitSync chỉ gọi exechook sau khi checkout hoàn tất và chờ hook kết thúc trước khi sync tiếp.
-# Lock của gitsync.sh cũng chặn transaction chồng nhau;
-# vì vậy commit trong request chính là revision bất biến của lần validate này.
-#   # Không validate request cũ nếu GitSync đã chuyển sang checkout mới hơn.
-#   actual="$(git -C "${SYNC_SRC}" rev-parse HEAD 2>/dev/null || true)"
-#   if [ "${actual}" != "${commit}" ]; then
-#     result "${commit}" FAIL "checkout changed during validation"
-#     return
-#   fi
+  # GitSync chỉ gọi exechook sau khi checkout hoàn tất và chờ hook kết thúc trước khi sync tiếp.
+  # Lock của gitsync.sh cũng chặn transaction chồng nhau;
+  # vì vậy commit trong request chính là revision bất biến của lần validate này.
+  # Bỏ request tồn từ lần recreate trước; không giữ ADC bận với SHA cũ.
+  actual="$(git -C "${SYNC_SRC}" rev-parse HEAD 2>/dev/null || true)"
+  if [ "${actual}" != "${commit}" ]; then
+    result "${commit}" FAIL "stale request; checkout=${actual}"
+    return
+  fi
 
   # Chỉ merge từ source đã pull. samples/runtime tuyệt đối không bị ghi đè.
   if ! SKIP_SAMPLE_UPDATE=1 \
@@ -87,6 +89,12 @@ validate() {
      "/usr/local/apisix/conf/config-${PROFILE}.yaml"
   cp "${work}/apisix-${PROFILE}.yaml" \
      "/usr/local/apisix/conf/apisix-${PROFILE}.yaml"
+
+  # Không đọc error.log mặc định: image APISIX nối nó vào stdout/stderr pipe,
+  # khiến grep chờ EOF vô hạn. ADC phải có regular file riêng cho transaction.
+  sed -i \
+    "s|^  error_log:.*$|  error_log: ${ADC_ERROR_LOG}|" \
+    "/usr/local/apisix/conf/config-${PROFILE}.yaml"
 
   # Chỉ thay file bên trong ADC container dùng một lần, không đụng file host.
   rm -rf /usr/local/apisix/apisix/plugins/custom \
@@ -133,8 +141,6 @@ validate() {
 
   # config_yaml.lua nạp standalone YAML theo timer sau khi worker boot.
   # Xóa log cũ để chỉ xét lỗi phát sinh từ candidate hiện tại.
-  ADC_ERROR_LOG="/usr/local/apisix/logs/error.log"
-  : > "${ADC_ERROR_LOG}"
 
   # Image APISIX chạy OpenResty foreground; chạy nền để ADC còn kiểm tra được
   # worker rồi chủ động quit, không làm GitSync exechook bị treo.
