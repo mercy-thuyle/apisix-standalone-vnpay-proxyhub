@@ -12,6 +12,7 @@ MERGE_SCRIPT="${SYNC_SRC}/scripts/runtime/merge-fragments.sh"
 INJECT_SCRIPT="/tmp/scripts/runtime/inject-certs.sh"
 ADC_DIR="/tmp/adc"
 ADC_TIMEOUT="${ADC_TIMEOUT:-90}"
+ADC_BLOCKED="${ADC_DIR}/blocked-${DC_PROFILE:-}"
 
 LOG_FILE="/tmp/logs/gitsync.log"
 mkdir -p "$(dirname "${LOG_FILE}")" 2>/dev/null || true
@@ -66,6 +67,20 @@ if git -C "${SYNC_SRC}" rev-parse HEAD > /dev/null 2>&1; then
 fi
 
 log "START — DC_PROFILE=${DC_PROFILE} | commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}"
+
+# Cùng SHA đã bị ADC từ chối: không merge/inject/dry-run lại liên tục.
+# GitSync vẫn có thể pull SHA MỚI; SHA mới sẽ đi qua validation bình thường.
+if [ -s "${ADC_BLOCKED}" ]; then
+  BLOCK_LINE=$(cat "${ADC_BLOCKED}" 2>/dev/null || true)
+  BLOCK_COMMIT=$(printf '%s' "${BLOCK_LINE}" | cut -f1)
+  BLOCK_STATUS=$(printf '%s' "${BLOCK_LINE}" | cut -f2)
+  BLOCK_DETAIL=$(printf '%s' "${BLOCK_LINE}" | cut -f3-)
+
+  if [ "${BLOCK_COMMIT}" = "${COMMIT_HASH}" ]; then
+    log_err "BLOCKED — ADC đã từ chối commit=${COMMIT_HASH}: ${BLOCK_STATUS:-FAIL} ${BLOCK_DETAIL}; live config unchanged"
+    exit 1
+  fi
+fi
 
 # ── Bố cục fragments: merge → inject → ADC gate → promote ──────────────────
 if [ -d "${ROUTES_SRC}/upstreams" ] && \
@@ -160,8 +175,16 @@ if [ -d "${ROUTES_SRC}/upstreams" ] && \
 
   # File chứng thực yêu cầu có cấu hình thành công, ngoài PASS verdict khớp.
   if [ "${ADC_STATUS}" != "PASS" ] || [ ! -s "${ADC_APPROVED}" ]; then
-    log_err "ERROR: ADC verdict for ${COMMIT_HASH}: ${ADC_STATUS:-TIMEOUT} ${ADC_DETAIL}; live config unchanged"
+    ADC_BLOCK_TMP="${ADC_BLOCKED}.tmp.$$"
+    printf '%s\t%s\t%s\n' \
+      "${COMMIT_HASH}" "${ADC_STATUS:-TIMEOUT}" "${ADC_DETAIL}" \
+      > "${ADC_BLOCK_TMP}"
+    mv "${ADC_BLOCK_TMP}" "${ADC_BLOCKED}"
+
+     log_err "ERROR: ADC verdict for ${COMMIT_HASH}: ${ADC_STATUS:-TIMEOUT} ${ADC_DETAIL}; live config unchanged"
+    log_err "BLOCKED — ghi ${ADC_BLOCKED}; cùng SHA sẽ fail nhanh, SHA mới vẫn được validate"
     rm -f "${STAGING}"
+    rm -f "${ADC_BLOCKED}"
     exit 1
   fi
 

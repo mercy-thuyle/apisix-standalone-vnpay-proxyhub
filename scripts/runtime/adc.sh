@@ -131,6 +131,11 @@ validate() {
   fi
   log "OK — apisix init"
 
+  # config_yaml.lua nạp standalone YAML theo timer sau khi worker boot.
+  # Xóa log cũ để chỉ xét lỗi phát sinh từ candidate hiện tại.
+  ADC_ERROR_LOG="/usr/local/apisix/logs/error.log"
+  : > "${ADC_ERROR_LOG}"
+
   # Image APISIX chạy OpenResty foreground; chạy nền để ADC còn kiểm tra được
   # worker rồi chủ động quit, không làm GitSync exechook bị treo.
   apisix start > "${work}/apisix-start.log" 2>&1 &
@@ -162,6 +167,23 @@ validate() {
     return
   fi
   log "OK — APISIX worker ready"
+
+  # Chờ ít nhất một chu kỳ config_yaml rồi mới kết luận candidate hợp lệ.
+  # Không chỉ dựa vào PID worker: schema route/plugin sai vẫn có thể xuất hiện sau khi Nginx đã start thành công.
+  # Worker chạy không đồng nghĩa declarative config hợp lệ.
+  # Chờ ít nhất một chu kỳ config_yaml rồi kiểm tra lỗi schema/YAML từ candidate này.
+  sleep "${ADC_CONFIG_SETTLE_SECONDS:-3}"
+
+  if grep -Eq \
+      'config_yaml\.lua:.*(failed to check item data|failed to load|failed to parse)' \
+      "${ADC_ERROR_LOG}"; then
+    log "FAIL — APISIX từ chối declarative config; xem error.log trong ADC"
+    apisix quit > /dev/null 2>&1 || true
+    wait "${apisix_start_pid}" 2>/dev/null || true
+    result "${commit}" FAIL "APISIX declarative config rejected"
+    return
+  fi
+  log "OK — declarative config accepted"
 
   # Dừng worker validator; tuyệt đối không ảnh hưởng APISIX production.
   apisix quit > /dev/null 2>&1 || true
