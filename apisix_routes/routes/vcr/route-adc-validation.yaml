@@ -9,8 +9,9 @@ routes:
         "127.0.0.1:1": 1
     plugins:
       ip-restriction:
-        blacklist:
-          - "203.0.113.10"
-        # blacklist: []
+        # blacklist:
+          # - "203.0.113.10"
+          # - "not-an-ip"
+        blacklist: []
       custom.test-header-capture:
         header_name: "X-ADC-Test"
