@@ -78,7 +78,7 @@ grep -q 'ret.data.data\[' "${DEPLOY_DIR}/vault.lua"   && echo "  ✅ return ret.
 
 # ── 4. Patch config_yaml.lua — log live reload rõ ràng hơn ────────────────
 echo ""
-+echo "▶ [4/5] Patch config_yaml.lua — chuẩn hoá log live reload..."
+echo "▶ [4/5] Patch config_yaml.lua — chuẩn hoá log live reload..."
 echo "  ⚠ Đây là patch thẩm mỹ (không ảnh hưởng chức năng)."
 echo "  ⚠ Nhạy cảm với thay đổi source code qua mỗi version — verify diff kỹ."
 docker run --rm "${IMAGE}" cat "${CONFIG_YAML}" > "${DEPLOY_DIR}/config_yaml.lua.orig"
