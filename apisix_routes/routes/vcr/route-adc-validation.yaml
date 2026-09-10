@@ -10,8 +10,8 @@ routes:
     plugins:
       ip-restriction:
         blacklist:
-          - "203.0.113.10"
-          # - "not-an-ip" # note từ YAML-02 sang lại YAML-01
+          # - "203.0.113.10"
+          - "not-an-ip" # note từ YAML-01 sang lại YAML-03
         # blacklist: []
       custom.test-header-capture:
         header_name: "X-ADC-Test"
