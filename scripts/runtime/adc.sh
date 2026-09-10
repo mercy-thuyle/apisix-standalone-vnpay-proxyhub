@@ -49,6 +49,33 @@ result() {
   log "VERDICT — commit=${commit} status=${status} detail=${detail}"
 }
 
+# Dừng trọn worker validator trước khi trả verdict hoặc chạy transaction kế tiếp.
+stop_validator() {
+  apisix quit > /dev/null 2>&1 || true
+
+  for _ in $(seq 1 40); do
+    nginx_pid="$(cat /usr/local/apisix/logs/nginx.pid 2>/dev/null || true)"
+    case "${nginx_pid}" in
+      ''|*[!0-9]*) break ;;
+      *)
+        kill -0 "${nginx_pid}" 2>/dev/null || break
+        ;;
+    esac
+    sleep 0.25
+  done
+
+  # Fallback nếu graceful quit chưa nhả master trong 10 giây.
+  nginx_pid="$(cat /usr/local/apisix/logs/nginx.pid 2>/dev/null || true)"
+  case "${nginx_pid}" in
+    ''|*[!0-9]*) ;;
+    *)
+      if kill -0 "${nginx_pid}" 2>/dev/null; then
+        apisix stop > /dev/null 2>&1 || true
+      fi
+      ;;
+  esac
+}
+
 # Validate một checkout GitSync bất biến. Mọi lỗi đều trả về cho bên yêu cầu;
 # controller vẫn tiếp tục chạy để xử lý commit kế tiếp.
 validate() {
@@ -143,10 +170,8 @@ validate() {
 
   ready=0
   for _ in $(seq 1 20); do
-    if ! kill -0 "${apisix_start_pid}" 2>/dev/null; then
-      break
-    fi
-
+    # Wrapper `apisix start` có thể thoát ngay sau khi spawn nginx master.
+    # Nguồn chân lý là nginx.pid, không phải PID của wrapper.
     nginx_pid="$(cat /usr/local/apisix/logs/nginx.pid 2>/dev/null || true)"
     case "${nginx_pid}" in
       ''|*[!0-9]*) ;;
@@ -157,10 +182,16 @@ validate() {
         fi
         ;;
     esac
+
+    # Chỉ fail nếu wrapper đã thoát mà nginx master chưa hề xuất hiện.
+    if ! kill -0 "${apisix_start_pid}" 2>/dev/null; then
+      break
+    fi
     sleep 0.25
   done
 
   if [ "${ready}" -ne 1 ]; then
+    stop_validator
     wait "${apisix_start_pid}" 2>/dev/null || true
     log "FAIL — APISIX worker không ready; xem ${work}/apisix-start.log"
     result "${commit}" FAIL "APISIX worker not ready"
@@ -180,7 +211,7 @@ validate() {
       'config_yaml\.lua:.*(failed to check item data|failed to load|failed to parse)' \
       "${ADC_ERROR_LOG}"; then
     log "FAIL — APISIX từ chối declarative config; xem error.log trong ADC"
-    apisix quit > /dev/null 2>&1 || true
+    stop_validator
     wait "${apisix_start_pid}" 2>/dev/null || true
     result "${commit}" FAIL "APISIX declarative config rejected"
     return
@@ -188,7 +219,7 @@ validate() {
   log "OK — declarative config accepted"
 
   # Dừng worker validator; tuyệt đối không ảnh hưởng APISIX production.
-  apisix quit > /dev/null 2>&1 || true
+  stop_validator
   wait "${apisix_start_pid}" 2>/dev/null || true
 
   # Artifact này chứng minh ADC thành công; GitSync giữ staging đã inject cert.
