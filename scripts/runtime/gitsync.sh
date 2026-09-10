@@ -81,7 +81,8 @@ if [ -s "${ADC_BLOCKED}" ]; then
     # Exit 0 chỉ xác nhận hook đã xử lý trạng thái BLOCKED; tuyệt đối không
     # merge/inject/promote file live. Chu kỳ poll sau vẫn nhận SHA mới để sửa.
     log "BLOCKED — commit-id=${COMMIT_HASH} | commit-msg=${COMMIT_MSG}: ${BLOCK_STATUS:-FAIL} ${BLOCK_DETAIL}; bỏ qua apply, chờ SHA mới"
-    exit 0  fi
+    exit 0
+  fi
 fi
 
 # ── Bố cục fragments: merge → inject → ADC gate → promote ──────────────────
