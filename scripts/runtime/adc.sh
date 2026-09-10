@@ -66,12 +66,6 @@ validate() {
   # GitSync chỉ gọi exechook sau khi checkout hoàn tất và chờ hook kết thúc trước khi sync tiếp.
   # Lock của gitsync.sh cũng chặn transaction chồng nhau;
   # vì vậy commit trong request chính là revision bất biến của lần validate này.
-  # Bỏ request tồn từ lần recreate trước; không giữ ADC bận với SHA cũ.
-  actual="$(git -C "${SYNC_SRC}" rev-parse HEAD 2>/dev/null || true)"
-  if [ "${actual}" != "${commit}" ]; then
-    result "${commit}" FAIL "stale request; checkout=${actual}"
-    return
-  fi
 
   # Chỉ merge từ source đã pull. samples/runtime tuyệt đối không bị ghi đè.
   if ! SKIP_SAMPLE_UPDATE=1 \
