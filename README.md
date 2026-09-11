@@ -1,6 +1,6 @@
 # Kiến trúc thư mục tại local mỗi DC
 ```
-/opt/apisix/apisix-standalone/
+/opt/apisix/standalone/
 │
 ├── gitsync/                                      ← GITSYNC_ROOT, 65533 tự quản, KHÔNG touch
 │   ├── .git
@@ -251,11 +251,11 @@ password glpat-xxxxxxxxxxxxxxxxxxxx
 EOF
 
 # Tạo thư mục 
-mkdir -p /opt/apisix/standalone
+mkdir -p /opt/apisix/
 
 # HTTPS (cần nhập username/password hoặc personal access token)
-git clone https://git-lab.infiniband.vn/apisix/proxyhub.git /opt/apisix/standalone/sandbox
-cd /opt/apisix/standalonesandbox
+git clone https://git-lab.infiniband.vn/apisix/proxyhub.git /opt/apisix/standalone
+cd /opt/apisix/standalone
 
 # Tắt track permission trong repo này
 git config core.fileMode false
