@@ -85,8 +85,17 @@ docker run --rm "${IMAGE}" cat "${CONFIG_YAML}" > "${DEPLOY_DIR}/config_yaml.lua
 cp "${DEPLOY_DIR}/config_yaml.lua.orig" "${DEPLOY_DIR}/config_yaml.lua"
 
 OLD_MSG='log.warn("config file ", config_file.path, " reloaded.")'
-NEW_MSG='log.warn("[APISIX LIVE-RELOAD OK] yaml=", config_file.path, " | source=gitsync | entities=routes/plugin_configs/services/upstreams/consumers/ssls | config.yaml requires container restart | validation/promote status: check logs/adc/adc.log + logs/gitsync/gitsync.log -> Verify: tail -F logs/apisix/error.log logs/adc/adc.log logs/gitsync/gitsync.log")'
-# sed -i "s|${OLD_MSG}|${NEW_MSG}|" "${DEPLOY_DIR}/config_yaml.lua"
+NEW_MSG='if ngx.worker.id() == 0 then
+    log.warn(
+        "[APISIX LIVE-RELOAD OK] yaml=", config_file.path,
+        " | source=gitsync",
+        " | entities=routes/plugin_configs/services/upstreams/consumers/ssls",
+        " | config.yaml requires container restart",
+        " | validation/promote: check logs/adc/adc.log + logs/gitsync/gitsync.log"
+    )
+end'
+
+# Không dùng sed: NEW_MSG chứa ký tự |, dễ làm sed hiểu nhầm delimiter.
 export OLD_MSG NEW_MSG
 python3 - "${DEPLOY_DIR}/config_yaml.lua" <<'PYEOF'
 import os
@@ -116,7 +125,7 @@ diff "${DEPLOY_DIR}/config_yaml.lua.orig" "${DEPLOY_DIR}/config_yaml.lua" || tru
 
 # Verify patch [4] áp dụng đúng
 if grep -q '\[APISIX LIVE-RELOAD OK\]' "${DEPLOY_DIR}/config_yaml.lua"; then
-  echo "  ✅ config_yaml.lua warn message: OK"
+  echo "  ✅ config_yaml.lua: LIVE-RELOAD OK chỉ ghi từ worker 0: OK"
 else
   echo "  ❌ config_yaml.lua warn message: FAILED"
   echo "     Pattern gốc có thể đã thay đổi trong version này."
@@ -280,7 +289,7 @@ echo "▶ Sau khi thêm volume mount, áp dụng:"
 echo "      docker compose up -d --force-recreate apisix-standalone"
 echo ""
 echo "▶ Verify live reload message mới (sau khi GitSync promote):"
-echo "      docker logs apisix-standalone --tail 20 | grep 'APISIX LIVE-RELOAD OK'"
+echo "      docker logs apisix-standalone --since 2m | grep -F '[APISIX LIVE-RELOAD OK]'"
 echo ""
 echo "▶ Theo dõi đủ chuỗi ADC → GitSync → APISIX live reload:"
 echo "      tail -F logs/adc/adc.log logs/gitsync/gitsync.log logs/apisix/error.log"
