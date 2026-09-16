@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # scripts/debug/proxyv2-test-client.py
 #
-# Gia lap dung 1 ket noi PROXY protocol v2 (TLV 0x05 = unique_id/network_id)
-# roi TLS handshake voi SNI that, de kiem tra logic sau global-abuse-guard
-# (X-Network-Id) va upstream routing (site-affinity HCM/HAN) - khong the
-# dung curl tran vi listener 8443 bat buoc PROXY-v2 truoc TLS ClientHello.
+# Giả lập đúng 1 kết nối PROXY protocol v2 (TLV 0x05 = unique_id/network_id)
+# rồi TLS handshake với SNI thật, để kiểm tra logic sau global-abuse-guard
+# (X-Network-Id) và upstream routing (site-affinity HCM/HAN) - không thể
+# dùng curl trần vì listener 443 bắt buộc PROXY-v2 trước TLS ClientHello
+# (đổi từ 8443 sang 443 - xem config-proxyhub.yaml: proxy_protocol.listen_https_port).
 
 import socket
 import ssl
@@ -49,4 +50,5 @@ if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "s3-hcm.sds.infiniband.vn"
     nid = sys.argv[2] if len(sys.argv) > 2 else "test-network-id-manual-verify"
     path = sys.argv[3] if len(sys.argv) > 3 else "/"
-    print(send_proxyv2_request(host, "127.0.0.1", 8443, nid, path))
+    port = int(sys.argv[4]) if len(sys.argv) > 4 else 443
+    print(send_proxyv2_request(host, "127.0.0.1", port, nid, path))
