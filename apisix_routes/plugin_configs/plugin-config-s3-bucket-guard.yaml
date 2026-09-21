@@ -4,6 +4,7 @@ plugin_configs:
 
       custom.s3-network-bucket-guard:
         network_id_header: "X-Network-Id"
+        client_ip_header: "X-Client-IP"
         apex_host: "s3-hcm.sds.infiniband.vn"
         vault_mount: "cloud/profile"
         vault_prefix: "app/apisix-proxyhub/network-buckets"   # namespace riêng, xác nhận quyền 'read' qua sys/capabilities-self
@@ -26,6 +27,7 @@ plugin_configs:
 
       custom.s3-network-bucket-guard:
         network_id_header: "X-Network-Id"
+        client_ip_header: "X-Client-IP"
         apex_host: "s3-hni.sds.infiniband.vn"
         vault_mount: "cloud/profile"
         vault_prefix: "app/apisix-proxyhub/network-buckets"   # namespace riêng, xác nhận quyền 'read' qua sys/capabilities-self

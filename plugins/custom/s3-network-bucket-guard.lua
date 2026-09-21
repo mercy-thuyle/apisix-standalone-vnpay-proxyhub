@@ -2,9 +2,19 @@
 --
 -- Mục 4 kế hoạch triển khai ProxyHub: giới hạn bucket S3 theo network_id.
 -- Khác hẳn cơ chế consumer_groups/consumer-restriction bên cụm S3-storage
--- (SigV4/AKID) — ở đây danh tính duy nhất là network_id lấy từ PROXY-v2 TLV
+-- (SigV4/AKID) — ở đây danh tính chính là network_id lấy từ PROXY-v2 TLV
 -- (đã set vào header X-Network-Id bởi global_rule "global-network-identity",
 -- xem apisix_routes/global_rules/global-network-identity.yaml, mục 1).
+--
+-- Đổi chính sách 18/09/2026: network_id không còn bắt buộc ở tầng global rule
+-- (không còn bị 403 sớm nếu thiếu TLV 0x05). Guard này giờ tự fallback: thiếu
+-- X-Network-Id thì dùng X-Client-IP (luôn có giá trị — global-abuse-guard set
+-- từ $remote_addr sau real_ip_header=proxy_protocol) làm identity để tra cứu
+-- allowlist, CÙNG mount/prefix Vault với network_id (không tách namespace
+-- riêng) — nghĩa là muốn 1 client_ip cụ thể được phép bucket nào thì phải tự
+-- onboard client_ip đó như 1 "network_id" trong Vault. Chỉ khi thiếu CẢ hai
+-- header mới fail-closed 403 (case này chỉ xảy ra nếu global-abuse-guard
+-- chưa chạy trước plugin, vd gắn sai plugin_config).
 --
 -- Allowlist KHÔNG nằm trong GitOps YAML (route/plugin_config) — nằm trong
 -- Vault KV v2, để team quản lý network onboard/thu hồi tenant KHÔNG cần
@@ -24,6 +34,14 @@ local schema = {
             type = "string",
             description = "Header chứa network_id, do global-network-identity set.",
             default = "X-Network-Id",
+        },
+        client_ip_header = {
+            type = "string",
+            description = "Header chứa client IP, do global-abuse-guard set — dùng làm "
+                        .. "identity fallback để tra Vault khi thiếu network_id_header. "
+                        .. "Vault key sẽ là chính giá trị IP này (cùng mount/prefix với "
+                        .. "network_id, không tách namespace riêng).",
+            default = "X-Client-IP",
         },
         apex_host = {
             type = "string",
@@ -119,13 +137,25 @@ end
 
 function _M.access(conf, ctx)
     local network_id = core.request.header(ctx, conf.network_id_header)
-    if not network_id or network_id == "" then
-        -- Phòng thủ theo lớp — global-network-identity (mục 1) đã reject 403
-        -- trước khi tới đây nếu thiếu network_id, nhánh này chỉ chạy nếu
-        -- plugin bị gắn vào route/plugin_config mà global_rule đó KHÔNG áp.
-        core.log.error("[", plugin_name, "] thiếu header ", conf.network_id_header,
-            " — global-network-identity chưa chạy trước plugin này?")
-        return conf.reject_code, { error_msg = "missing network identity" }
+    local identity, identity_type
+
+    if network_id and network_id ~= "" then
+        identity = network_id
+        identity_type = "network_id"
+    else
+        -- network_id không bắt buộc nữa (đổi chính sách 18/09/2026) — fallback
+        -- sang client_ip, do global-abuse-guard set sẵn từ $remote_addr.
+        local client_ip = core.request.header(ctx, conf.client_ip_header)
+        if not client_ip or client_ip == "" then
+            -- Thiếu CẢ hai header nghĩa là global-abuse-guard chưa chạy trước
+            -- plugin này (vd gắn sai plugin_config) — không có identity nào để
+            -- tra Vault, phải fail-closed.
+            core.log.error("[", plugin_name, "] thiếu cả header ", conf.network_id_header,
+                " lẫn ", conf.client_ip_header, " — global-abuse-guard chưa chạy trước plugin này?")
+            return conf.reject_code, { error_msg = "missing network identity" }
+        end
+        identity = client_ip
+        identity_type = "client_ip"
     end
 
     local bucket = extract_bucket(ctx, conf.apex_host)
@@ -142,15 +172,15 @@ function _M.access(conf, ctx)
     end
 
     local data, err = vault_client.get(
-        conf.vault_mount, conf.vault_prefix, network_id,
+        conf.vault_mount, conf.vault_prefix, identity,
         "network-bucket-allowlist", conf.cache_ttl
     )
 
     if err == "not_found" then
-        -- network_id chưa được onboard trong Vault — LUÔN fail-closed,
-        -- không phụ thuộc conf.fail_open (đó là cờ cho lỗi HẠ TẦNG Vault,
-        -- không phải cho case "chính sách nói không cho phép").
-        core.log.warn("[", plugin_name, "] network_id '", network_id,
+        -- identity (network_id hoặc client_ip) chưa được onboard trong Vault —
+        -- LUÔN fail-closed, không phụ thuộc conf.fail_open (đó là cờ cho lỗi
+        -- HẠ TẦNG Vault, không phải cho case "chính sách nói không cho phép").
+        core.log.warn("[", plugin_name, "] ", identity_type, " '", identity,
             "' không có allowlist trong Vault — deny bucket '", bucket, "'")
         return conf.reject_code, { error_msg = "network not authorized for any bucket" }
     end
@@ -166,7 +196,7 @@ function _M.access(conf, ctx)
 
     local allowed_buckets = data.buckets
     if type(allowed_buckets) ~= "table" then
-        core.log.error("[", plugin_name, "] Vault value cho network_id '", network_id,
+        core.log.error("[", plugin_name, "] Vault value cho ", identity_type, " '", identity,
             "' thiếu field 'buckets' dạng mảng — coi như deny toàn bộ")
         return conf.reject_code, { error_msg = "malformed policy for this network" }
     end
@@ -177,7 +207,7 @@ function _M.access(conf, ctx)
         end
     end
 
-    core.log.warn("[", plugin_name, "] network_id '", network_id,
+    core.log.warn("[", plugin_name, "] ", identity_type, " '", identity,
         "' không được phép truy cập bucket '", bucket, "'")
     return conf.reject_code, { error_msg = "bucket not in allowlist for this network" }
 end
