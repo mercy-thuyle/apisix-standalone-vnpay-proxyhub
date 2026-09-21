@@ -25,152 +25,152 @@
 │       └── scripts/
 │
 ├── apisix_config/
-│   └── config-proxyhub.yaml                           ← APISIX đọc và mount file này, nội dung update thay đổi trên gitlab sau đó tạo change,
-│                                                   admin copy về local file này và deploy thủ công (lint syntax, logic, dry-run, restart docker container...
-│                                                   hoặc combo systemd watcher theo dõi + tự động restart docker container)
+│   └── config-proxyhub.yaml                      ← APISIX đọc và mount file này, nội dung update thay đổi trên gitlab sau đó tạo change,
+│                                                  admin copy về local file này và deploy thủ công (lint syntax, logic, dry-run, restart docker container...
+│                                                  hoặc combo systemd watcher theo dõi + tự động restart docker container)
 │
-├── apisix_routes/                                ← thư mục gốc chứa fragment, merge thành apisix-proxyhub.yaml bởi merge-fragments.sh
-│   ├── global_rules/                             ← guard + chuẩn hoá header, áp cho MỌI route, FLAT
-│   │   └── <rule-id>.yaml                        ← 1 file = 1+ global_rule, key bắt buộc: "global_rules:"
-│   │                                                vd: global-network-identity.yaml (X-Network-Id/X-Client-IP
-│   │                                                từ PROXY-v2, xem mục 1 kế hoạch triển khai)
+├── apisix_routes/                               ← thư mục gốc chứa fragment, merge thành apisix-proxyhub.yaml bởi merge-fragments.sh
+│   ├── global_rules/                            ← guard + chuẩn hoá header, áp cho MỌI route, FLAT
+│   │   └── <rule-id>.yaml                       ← 1 file = 1+ global_rule, key bắt buộc: "global_rules:"
+│   │                                              vd: global-network-identity.yaml (X-Network-Id/X-Client-IP
+│   │                                              từ PROXY-v2, xem mục 1 kế hoạch triển khai)
 │   │                                                
 │   ├── plugin_configs/                           ← bundle policy theo dịch vụ backend (VCR path-guard,
 │   │   └── <plugin-config-id>.yaml                 S3 bucket-guard...), FLAT, key bắt buộc: "plugin_configs:"
 │   │
-│   ├── plugin_metadata/                          ← cấu hình runtime cho custom plugin (vd log-level), FLAT
+│   ├── plugin_metadata/                         ← cấu hình runtime cho custom plugin (vd log-level), FLAT
 │   │   └── <plugin-name>.yaml
 │   │
-│   ├── routes/                                   ← GROUPED theo backend: vcr/, s3/, maas/
+│   ├── routes/                                  ← GROUPED theo backend: vcr/, s3/, maas/
 │   │   └── <backend>/
-│   │       └── <route-id>.yaml                   ← 1 file = 1+ route, key bắt buộc: "routes:"
-│   │                                                Route theo SNI/Host, KHÔNG theo path như S3 (trừ VCR
-│   │                                                giới hạn prefix /kaas — xem mục 3 kế hoạch triển khai)
+│   │       └── <route-id>.yaml                  ← 1 file = 1+ route, key bắt buộc: "routes:"
+│   │                                              Route theo SNI/Host, KHÔNG theo path như S3 (trừ VCR
+│   │                                              giới hạn prefix /kaas — xem mục 3 kế hoạch triển khai)
 │   │
-│   ├── services/                                 ← FLAT — 1 service = 1:1 upstream_id, KHÔNG chứa policy plugin
-│   │   └── <service-id>.yaml                     ← 1 file = 1+ service, key bắt buộc: "services:"
+│   ├── services/                                ← FLAT — 1 service = 1:1 upstream_id, KHÔNG chứa policy plugin
+│   │   └── <service-id>.yaml                    ← 1 file = 1+ service, key bắt buộc: "services:"
 │   │
-│   ├── ssls/                                     ← SSL cert fragments cho từng SNI (VCR/S3/MAAS FQDN), FLAT
-│   │   └── <ssl-id>.yaml                         ← key bắt buộc: "ssls:"
+│   ├── ssls/                                    ← SSL cert fragments cho từng SNI (VCR/S3/MAAS FQDN), FLAT
+│   │   └── <ssl-id>.yaml                        ← key bắt buộc: "ssls:"
 │   │
-│   └── upstreams/                                ← FLAT — 1 upstream = 1 backend vật lý (VCR/S3/MAAS)
-│       └── <upstream-id>.yaml                    ← key bắt buộc: "upstreams:"
+│   └── upstreams/                               ← FLAT — 1 upstream = 1 backend vật lý (VCR/S3/MAAS)
+│       └── <upstream-id>.yaml                   ← key bắt buộc: "upstreams:"
 │
 ├── certs/                                       ← admin KHÔNG chỉnh tay — 2-decrypt-certs.sh ghi ra, APISIX mount, restart khi đổi
 │   ├── kafka.crt                                ← cp từ gitsync
 │   ├── ca-certificates.crt                       ← cp từ gitsync
-│   ├── <fqdn-vcr>.cert / .key.enc                ← cp từ gitsync / 3-decrypt-certs.sh ghi ra .key
+│   ├── <fqdn-vcr>.cert / .key.enc               ← cp từ gitsync / 3-decrypt-certs.sh ghi ra .key
 │   ├── <fqdn-s3>.cert   / .key.enc
 │   └── <fqdn-maas>.cert / .key.enc
 │
 ├── dashboard/
 │   ├── Dockerfile                                # multi-stage: node build FE → python runtime (+lua5.1/luac)
-│   ├── README.md                                 # bootstrap, vận hành, dev local — đọc file này trước khi deploy dashboard
-│   ├── dashboard-workspace/                      ← working clone RIÊNG của dashboard (gitignored + dockerignore) — dashboard tự
-│   │                                               clone/pull/commit/push; KHÔNG đụng gitsync/ (git-sync tự quản), KHÔNG sửa tay
+│   ├── README.md                                # bootstrap, vận hành, dev local — đọc file này trước khi deploy dashboard
+│   ├── dashboard-workspace/                     ← working clone RIÊNG của dashboard (gitignored + dockerignore) — dashboard tự
+│   │                                              clone/pull/commit/push; KHÔNG đụng gitsync/ (git-sync tự quản), KHÔNG sửa tay
 │   ├── backend/
 │   │   ├── pyproject.toml
 │   │   ├── app/
-│   │   │   ├── main.py                           # FastAPI factory, serve static FE build
-│   │   │   ├── settings.py                       # pydantic-settings, đọc .env riêng của dashboard
-│   │   │   ├── auth/                             # provider.py (interface) · none.py · basic.py · middleware.py
-│   │   │   └── api/                              # routers mỏng:
-│   │   │       ├── entities.py                   #   CRUD 8 loại entity fragment
-│   │   │       ├── lua_plugins.py                #   list/view/edit plugins/custom + libraries
-│   │   │       ├── control_plane.py              #   config-proxyhub: edit + copy-to-sandbox + restart
-│   │   │       ├── gitops.py                     #   diff, commit/push, MR, history (git log --follow), revert placeholder
-│   │   │       ├── status.py                     #   gitsync log tail, apisix reloaded check, MR poll
+│   │   │   ├── main.py                          # FastAPI factory, serve static FE build
+│   │   │   ├── settings.py                      # pydantic-settings, đọc .env riêng của dashboard
+│   │   │   ├── auth/                            # provider.py (interface) · none.py · basic.py · middleware.py
+│   │   │   └── api/                             # routers mỏng:
+│   │   │       ├── entities.py                  #   CRUD 8 loại entity fragment
+│   │   │       ├── lua_plugins.py               #   list/view/edit plugins/custom + libraries
+│   │   │       ├── control_plane.py             #   config-proxyhub: edit + copy-to-sandbox + restart
+│   │   │       ├── gitops.py                    #   diff, commit/push, MR, history (git log --follow), revert placeholder
+│   │   │       ├── status.py                    #   gitsync log tail, apisix reloaded check, MR poll
 │   │   │       └── profile_map.py                #   CRUD profile-map (badge "chưa enforce")
-│   │   ├── core/                                 # ★ business logic thuần, không dính FastAPI
-│   │   │   ├── repo.py                           #   GitPython wrapper: clone/pull-rebase/commit/push/branch
-│   │   │   ├── gitlab_api.py                     #   tạo MR, poll MR status (python-gitlab)
-│   │   │   ├── fragments.py                      #   entity model ↔ folder/key mapping, naming convention
-│   │   │   │                                     #   route-<domain>-<scheme>-<port>, disable-by-comment toggle
-│   │   │   ├── yamlio.py                          #   ruamel round-trip read/write, chuẩn hoá key cột 0
-│   │   │   ├── validate.py                       #   key-khớp-folder, dup id/username (chặn cứng), empty-array minItems
+│   │   ├── core/                                # ★ business logic thuần, không dính FastAPI
+│   │   │   ├── repo.py                          #   GitPython wrapper: clone/pull-rebase/commit/push/branch
+│   │   │   ├── gitlab_api.py                    #   tạo MR, poll MR status (python-gitlab)
+│   │   │   ├── fragments.py                     #   entity model ↔ folder/key mapping, naming convention
+│   │   │   │                                    #   route-<domain>-<scheme>-<port>, disable-by-comment toggle
+│   │   │   ├── yamlio.py                        #   ruamel round-trip read/write, chuẩn hoá key cột 0
+│   │   │   ├── validate.py                      #   key-khớp-folder, dup id/username (chặn cứng), empty-array minItems
 │   │   │   │
 │   │   │   ├── profile_map.py                    #   parser riêng cho format INI-section-trong-.yaml
-│   │   │   ├── lua_lint.py                       #   luac -p subprocess, trả kết quả không tự sửa
-│   │   │   ├── docker_ctl.py                     #   restart whitelist cứng "apisix-standalone", không nhận input tuỳ ý
-│   │   │   └── audit.py                          #   audit log thường + audit log control-plane riêng (JSONL)
-│   │   └── tests/                                # unit test core/ (fragments round-trip giữ comment, validate, profile-map parser)
+│   │   │   ├── lua_lint.py                      #   luac -p subprocess, trả kết quả không tự sửa
+│   │   │   ├── docker_ctl.py                    #   restart whitelist cứng "apisix-standalone", không nhận input tuỳ ý
+│   │   │   └── audit.py                         #   audit log thường + audit log control-plane riêng (JSONL)
+│   │   └── tests/                               # unit test core/ (fragments round-trip giữ comment, validate, profile-map parser)
 │   └── frontend/
 │       ├── package.json · vite.config.ts · tsconfig.json
 │       └── src/
-│           ├── api/                            # client + types
-│           ├── components/                     # DiffViewer, SaveDialog (main/MR), MonacoYaml, MonacoLua,
-│           │                                   # DcBadge ("Dự kiến — chưa enforce"), AuditTable, StatusPanel
-│           ├── pages/                          # 8 trang entity + LuaPlugins + ControlPlane + ProfileMap + Status + History
-│           └── App.tsx                         # layout, DC selector, auth guard
+│           ├── api/                             # client + types
+│           ├── components/                      # DiffViewer, SaveDialog (main/MR), MonacoYaml, MonacoLua,
+│           │                                    # DcBadge ("Dự kiến — chưa enforce"), AuditTable, StatusPanel
+│           ├── pages/                           # 8 trang entity + LuaPlugins + ControlPlane + ProfileMap + Status + History
+│           └── App.tsx                          # layout, DC selector, auth guard
 │
 ├── logs/
-│   ├── apisix/                                   ← 1 log dir per VM tại mỗi DC
+│   ├── apisix/                                  ← 1 log dir per VM tại mỗi DC
 │   │   ├── access.log
 │   │   ├── error.log
 │   │   ├── nginx.pid
 │   │   └── worker_events.sock
 │   ├── dashboard/
 │   │   ├── frontend/
-│   │   │   └── frontend.log                      ← HTTP access log (uvicorn access): mọi request tải UI + gọi API (ai truy cập, lúc nào, endpoint gì, status code)
+│   │   │   └── frontend.log                     ← HTTP access log (uvicorn access): mọi request tải UI + gọi API (ai truy cập, lúc nào, endpoint gì, status code)
 │   │   └── backend/
-│   │       ├── backend.log                       ← application log: startup, lỗi, git operations, lint, exceptions
-│   │       ├── audit.log                         ← audit CRUD entity (JSONL): actor, entity, action, commit sha, diff stat
-│   │       └── audit-control-plane.log           ← audit RIÊNG mức cao: edit config-proxyhub + restart (ai, diff, kết quả restart)
+│   │       ├── backend.log                      ← application log: startup, lỗi, git operations, lint, exceptions
+│   │       ├── audit.log                        ← audit CRUD entity (JSONL): actor, entity, action, commit sha, diff stat
+│   │       └── audit-control-plane.log          ← audit RIÊNG mức cao: edit config-proxyhub + restart (ai, diff, kết quả restart)
 │   │
 │   ├── gitsync/
-│   │   └── gitsync.log                           ← mount file trực tiếp vào /tmp/logs/gitsync.log, ghi mỗi lần git-sync pull
+│   │   └── gitsync.log                          ← mount file trực tiếp vào /tmp/logs/gitsync.log, ghi mỗi lần git-sync pull
 │   └── redis/
 │       └── redis.log
 │
-├── plugins/                                      ← deploy thủ công, restart khi thay đổi
-│   ├── custom/                                   ← Custom APISIX Lua plugins
-│   │   └── log-level.lua                         ← APISIX plugin — utility runtime log-level, dùng chung được cho mọi custom plugin ProxyHub 
+├── plugins/                                     ← deploy thủ công, restart khi thay đổi
+│   ├── custom/                                  ← Custom APISIX Lua plugins
+│   │   └── log-level.lua                        ← APISIX plugin — utility runtime log-level, dùng chung được cho mọi custom plugin ProxyHub 
 │   │
-│   └── libraries/                                ← Pure Lua (utility module) shared plugins library
-│       └── vault-client.lua                      ← Lua library — Vault KV v2 - thư viện client custom cho plugin bucket-guard (mục 4)
+│   └── libraries/                               ← Pure Lua (utility module) shared plugins library
+│       └── vault-client.lua                     ← Lua library — Vault KV v2 - thư viện client custom cho plugin bucket-guard (mục 4)
 │
-├── samples/                                      ← template full khi gộp lại
+├── samples/                                     ← template full khi gộp lại
 │   ├── runtime/
 │   │   └── apisix-proxyhub.yaml
 │   └── apisix.yaml
 │
 ├── scripts/
-│   ├── debug/                                    ← tool troubleshoot, chạy tay khi cần, không mount vào container
-│   │   ├── check-apisix-plugin.sh                ← lấy danh sách plugin BUILT-IN thật từ container đang chạy, diff với config-*.yaml (plugin mới xuất hiện / plugin bị xoá sau upgrade image) — KHÔNG check syntax/logic plugin custom
-│   │   ├── curl-route.sh                         ← Check curl với backend và apisix
-│   │   └── verify-apisix.sh                      ← Kiểmt ra lại toàn bộ các logic của apisix và các tính năng đi kèm
+│   ├── debug/                                   ← tool troubleshoot, chạy tay khi cần, không mount vào container
+│   │   ├── check-apisix-plugin.sh               ← lấy danh sách plugin BUILT-IN thật từ container đang chạy, diff với config-*.yaml (plugin mới xuất hiện / plugin bị xoá sau upgrade image) — KHÔNG check syntax/logic plugin custom
+│   │   ├── curl-route.sh                        ← Check curl với backend và apisix
+│   │   └── verify-apisix.sh                     ← Kiểmt ra lại toàn bộ các logic của apisix và các tính năng đi kèm
 │   │
-│   ├── deploy/                                   ← chạy có chủ đích bởi admin, không trigger tự động
-│   │   ├── 1-patch-template-lua.sh               ← chạy 1 lần khi deploy hoặc upgrade APISIX
-│   │   ├── 2-encrypt-certs.sh                    ← chạy trên máy admin trước khi commit cert lên repo
-│   │   ├── 3-decrypt-certs.sh                    ← chạy 1 lần khi deploy hoặc đổi cert
-│   │   └── deploy.sh                             ← entry point: patch lua → decrypt certs → compose up
-│   ├── libraries/                                ← shared lib, không chạy trực tiếp
-│   │   ├── cert-list-domains.txt                 ← danh sách domain cần inject cert vào apisix-proxyhub.yaml, lib dùng chung cho 2-decrypt-certs.sh và 3-inject-certs.sh
-│   │   ├── decrypt-cert-helper.sh                ← CERT_DOMAINS array — nguồn duy nhất domain nào cần cert (dùng bởi 3-decrypt-certs.sh), kèm override filename cho domain đặt tên khác convention (SRC_CERT_FILE/SRC_KEY_ENC_FILE, vd cmc.sds.infiniband.vn copy nguyên tên từ nginx)
+│   ├── deploy/                                  ← chạy có chủ đích bởi admin, không trigger tự động
+│   │   ├── 1-patch-template-lua.sh              ← chạy 1 lần khi deploy hoặc upgrade APISIX
+│   │   ├── 2-encrypt-certs.sh                   ← chạy trên máy admin trước khi commit cert lên repo
+│   │   ├── 3-decrypt-certs.sh                   ← chạy 1 lần khi deploy hoặc đổi cert
+│   │   └── deploy.sh                            ← entry point: patch lua → decrypt certs → compose up
+│   ├── libraries/                               ← shared lib, không chạy trực tiếp
+│   │   ├── cert-list-domains.txt                ← danh sách domain cần inject cert vào apisix-proxyhub.yaml, lib dùng chung cho 2-decrypt-certs.sh và 3-inject-certs.sh
+│   │   ├── decrypt-cert-helper.sh               ← CERT_DOMAINS array — nguồn duy nhất domain nào cần cert (dùng bởi 3-decrypt-certs.sh), kèm override filename cho domain đặt tên khác convention (SRC_CERT_FILE/SRC_KEY_ENC_FILE, vd cmc.sds.infiniband.vn copy nguyên tên từ nginx)
 │   │   └── profile-map.yaml                      ← khai subfolder nào trong routes/upstreams thuộc DC profile nào (hcm/hni,han/*), dùng bởi merge-fragments.sh — subfolder chưa khai → mặc định shared (*) + WARNING, không block merge
-│   └── runtime/                                  ← được mount vào gitsync container, trigger tự động sau mỗi git sync
-│       ├── gitsync.sh                            ← exechook của git-sync, detect layout và gọi merge-fragments.sh
-│       ├── inject-certs.sh                       ← chạy 1 lần khi deploy hoặc đổi cert
-│       └── merge-fragments.sh                    ← validate + gộp upstreams/routes/ssls thành apisix-proxyhub.yaml
+│   └── runtime/                                 ← được mount vào gitsync container, trigger tự động sau mỗi git sync
+│       ├── gitsync.sh                           ← exechook của git-sync, detect layout và gọi merge-fragments.sh
+│       ├── inject-certs.sh                      ← chạy 1 lần khi deploy hoặc đổi cert
+│       └── merge-fragments.sh                   ← validate + gộp upstreams/routes/ssls thành apisix-proxyhub.yaml
 │
 
 ├── secrets/
-│   ├── .netrc                                    ← GitLab HTTPS auth cho gitsync, read-only (gitignored, KHÔNG commit), chmod 600
-│   ├── .netrc-dashboard                          ← token RIÊNG của dashboard (read+write repository) — tách audit trail, chmod 600
-│   └── dashboard-users.htpasswd                  ← (tuỳ chọn) user basic-auth dashboard, bcrypt (htpasswd -B), chmod 600
+│   ├── .netrc                                   ← GitLab HTTPS auth cho gitsync, read-only (gitignored, KHÔNG commit), chmod 600
+│   ├── .netrc-dashboard                         ← token RIÊNG của dashboard (read+write repository) — tách audit trail, chmod 600
+│   └── dashboard-users.htpasswd                 ← (tuỳ chọn) user basic-auth dashboard, bcrypt (htpasswd -B), chmod 600
 │
 
 │ 
-├── vault.lua.lua                                 ← patched — thay đổi kv v1 thành kv v2, tạo bởi 1-patch-template-lua.sh
-├── vault.lua.orig                                ← bản gốc extract từ image, dùng để diff khi upgrade APISIX version
+├── vault.lua.lua                                ← patched — thay đổi kv v1 thành kv v2, tạo bởi 1-patch-template-lua.sh
+├── vault.lua.orig                               ← bản gốc extract từ image, dùng để diff khi upgrade APISIX version
 ├── config_yaml.lua                               ← patched — thay đổi log warning mặc định của APISIX khi hot-reload
 ├── config_yaml.lua.orig                          ← bản gốc extract từ image, dùng để diff khi upgrade APISIX version
-├── .yamllint.yaml                                ← yamllint rule config — nới lỏng line-length/comment style, giữ error cho trailing-spaces/key-duplicates/newline
-├── .env                                          ← DC_PROFILE=proxyhub và CERT_PASSPHRASE cho encrypt/decrypt (có trong .gitignore, KHÔNG commit)
+├── .yamllint.yaml                               ← yamllint rule config — nới lỏng line-length/comment style, giữ error cho trailing-spaces/key-duplicates/newline
+├── .env                                         ← DC_PROFILE=proxyhub và CERT_PASSPHRASE cho encrypt/decrypt (có trong .gitignore, KHÔNG commit)
 ├── .gitignore
-├── redis.conf                                    ← artifact cho cấu hình của redis local
-├── prometheus.yaml                               ← artifact cho cấu hình của prometheus exporter đến mimir
+├── redis.conf                                   ← artifact cho cấu hình của redis local
+├── prometheus.yaml                              ← artifact cho cấu hình của prometheus exporter đến mimir
 └── docker-compose.yaml
 ```
 
@@ -280,7 +280,8 @@ openssl rand -base64 32
 openssl rand -hex 32
 
 cat > .env << 'EOF'
-DC_PROFILE=proxyhub
+APISIX_PROFILE=proxyhub
+DC_PROFILE=hcm
 ORDER_NUM=1     # số thứ tự của instance ví dụ 1,2,3,... khi kết hợp sẽ thành hcm-1, han-2,...
 CERT_PASSPHRASE=<random-strong-passphrase>
 KAFKA_SASL_USER=apisix
