@@ -109,7 +109,7 @@ validate() {
 
   # Dựng private view APISIX của validator từ checkout candidate.
   # Một static config chung trong repo; APISIX vẫn đọc đúng tên theo profile.
-  cp "${SYNC_SRC}/apisix_config/config-internal.yaml" \
+  cp "${SYNC_SRC}/apisix_config/config-proxyhub.yaml" \
      "/usr/local/apisix/conf/config-${APISIX_PROFILE}.yaml"
   cp "${work}/apisix-${APISIX_PROFILE}.yaml" \
      "/usr/local/apisix/conf/apisix-${APISIX_PROFILE}.yaml"
