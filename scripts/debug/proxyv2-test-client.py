@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 # scripts/debug/proxyv2-test-client.py
 #
-# Giả lập đúng 1 kết nối PROXY protocol v2 (TLV 0x05 = unique_id/network_id)
-# rồi TLS handshake với SNI thật, để kiểm tra logic sau global-abuse-guard
-# (X-Network-Id) và upstream routing (site-affinity HCM/HAN) - không thể
-# dùng curl trần vì listener 443 bắt buộc PROXY-v2 trước TLS ClientHello
-# (đổi từ 8443 sang 443 - xem config-proxyhub.yaml: proxy_protocol.listen_https_port).
+# Giả lập 1 kết nối PROXY protocol v2 rồi TLS handshake với SNI thật, để
+# kiểm tra logic sau global-abuse-guard (X-Network-Id/X-Client-IP) và upstream
+# routing (site-affinity HCM/HAN) - không thể dùng curl trần vì listener 443
+# bắt buộc PROXY-v2 trước TLS ClientHello (đổi từ 8443 sang 443 - xem
+# config-proxyhub.yaml: proxy_protocol.listen_https_port).
+#
+# Đổi chính sách 18/09/2026: network_id (TLV 0x05 = unique_id) KHÔNG còn bắt
+# buộc - global-abuse-guard không còn ngx.exit(403) khi thiếu, và
+# s3-network-bucket-guard fallback tra Vault theo X-Client-IP (set từ IP
+# nguồn trong PROXY-v2 header, "172.25.180.125" ở addr bên dưới) khi thiếu
+# X-Network-Id. Script này giờ hỗ trợ cả 2 nhánh:
+#   - Có network_id: truyền bình thường (arg 2), TLV 0x05 được gửi kèm.
+#   - Không network_id: truyền chuỗi rỗng "" ở arg 2 - script BỎ HẲN TLV 0x05,
+#     mô phỏng đúng client không qua HAProxy unique-id, để test nhánh fallback
+#     X-Client-IP ở s3-network-bucket-guard.
 
 import socket
 import ssl
@@ -21,8 +31,13 @@ def send_proxyv2_request(host, target_ip, port, network_id, path="/"):
         + socket.inet_aton("172.26.8.30")
         + struct.pack('!HH', 51234, port)
     )
-    nid = network_id.encode()
-    tlv = bytes([0x05]) + struct.pack('!H', len(nid)) + nid
+    if network_id:
+        nid = network_id.encode()
+        tlv = bytes([0x05]) + struct.pack('!H', len(nid)) + nid
+    else:
+        # network_id rỗng/None - bỏ hẳn TLV 0x05, mô phỏng kết nối không có
+        # network identity (test nhánh fallback X-Client-IP).
+        tlv = b""
     body = addr + tlv
     header = sig + ver_cmd + fam_proto + struct.pack('!H', len(body)) + body
 
@@ -48,6 +63,9 @@ def send_proxyv2_request(host, target_ip, port, network_id, path="/"):
 
 if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "s3-hcm.sds.infiniband.vn"
+    # KHÔNG truyền arg2 -> dùng network_id mặc định (giữ tương thích lệnh cũ
+    # trong báo cáo). Truyền arg2 = "" (chuỗi rỗng tường minh) -> bỏ TLV 0x05,
+    # test nhánh không có network_id.
     nid = sys.argv[2] if len(sys.argv) > 2 else "test-network-id-manual-verify"
     path = sys.argv[3] if len(sys.argv) > 3 else "/"
     port = int(sys.argv[4]) if len(sys.argv) > 4 else 443
