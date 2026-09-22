@@ -60,7 +60,7 @@ services:
       # GITSYNC_SCOPE_TARGET: "master"
     env_file: .env
     healthcheck:
-      test: ["CMD", "test -f /tmp/apisix_routes/apisix-${APISIX_PROFILE}.yaml"]
+      test: ["CMD", "test -f /tmp/apisix_routes/apisix-$${APISIX_PROFILE}.yaml"]
       interval: 15s
       timeout: 5s
       retries: 5
