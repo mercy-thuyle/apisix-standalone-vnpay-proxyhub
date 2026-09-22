@@ -148,7 +148,7 @@ services:
       - VAULT_ADDR=${VAULT_ADDR}
       - VAULT_TOKEN=${VAULT_TOKEN}
     volumes:
-      - ./apisix_routes/apisix-${APISIX_PROFILE}.yaml:/usr/local/apisix/conf/apisix-${PROJECT}-${DC_SITE}.yaml
+      - ./apisix_routes/apisix-${PROJECT}-${DC_SITE}.yaml:/usr/local/apisix/conf/apisix-${PROJECT}-${DC_SITE}.yaml
       - ./apisix_config/config-proxyhub.yaml:/usr/local/apisix/conf/config-${PROJECT}-${DC_SITE}.yaml:ro
       - ./certs:/usr/local/apisix/certs:ro
       - ./vault.lua:/usr/local/apisix/apisix/secret/vault.lua:ro
