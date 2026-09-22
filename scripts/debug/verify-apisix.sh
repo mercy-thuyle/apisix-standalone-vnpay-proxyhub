@@ -5,12 +5,14 @@
 # Nguyên tắc mỗi bước trong script: EXPLAIN (đang test service/route/logic nào, vì sao)
 # -> RUN -> RESULT (kết quả kèm next-step cụ thể nếu OK/WARN/FAIL), không chỉ echo số liệu khô.
 #
+# Usage (default — dùng AWS profile 'thuyldx-cloud' + bucket 'thuyldx-cloud'.
+# PROJECT/DC_SITE được đọc từ .env; Internal chạy direct TLS/curl, ProxyHub chạy PROXY-v2).
 # Usage (post-apply thủ công; ADC là pre-apply gate duy nhất):
 #   ./verify-apisix.sh
 #
 # Override khi cần:
-#   APISIX_PROFILE=proxyhub ./verify-apisix.sh
-#   PROXYV2_NETWORK_ID=manual-test ./verify-apisix.sh
+#   DC_SITE=han ./verify-apisix.sh           # ép DC khi cần kiểm tra site khác
+#   AWS_PROFILE=other-profile ./verify-apisix.sh
 #   S3_TEST_BUCKET=other-bucket ./verify-apisix.sh
 #   AWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=yyy ./verify-apisix.sh   # session tạm, KHÔNG lưu vào file
 #
@@ -82,17 +84,6 @@ if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
 fi
 # ---------- Config còn lại (override qua env) ----------
 BASE_DIR="${BASE_DIR:-/opt/apisix/standalone}"
-# Chỉ đọc biến định danh, không source nguyên .env có secret.
-if [ -f "${BASE_DIR}/.env" ]; then
-  _DC_FROM_ENV=$(sed -n 's/^DC_PROFILE=//p' "${BASE_DIR}/.env" | tail -1)
-  _APISIX_FROM_ENV=$(sed -n 's/^APISIX_PROFILE=//p' "${BASE_DIR}/.env" | tail -1)
-fi
-
-DC_PROFILE="${DC_PROFILE:-${_DC_FROM_ENV:-proxyhub}}"
-APISIX_PROFILE="${APISIX_PROFILE:-${_APISIX_FROM_ENV:-proxyhub}}"
-unset _DC_FROM_ENV _APISIX_FROM_ENV
-echo "  [INFO] DC_PROFILE=${DC_PROFILE}; APISIX_PROFILE=${APISIX_PROFILE}"
-
 # ── Auto-load KAFKA_SASL_PASSWORD từ .env (KHÔNG echo secret ra màn hình) ────
 # .env đã dùng chung cho REDIS_PASSWORD/CERT_PASSPHRASE/VAULT_* qua
 # docker-compose env_file: .env — verify script đọc cùng file, tránh phải
@@ -107,10 +98,67 @@ if [ -z "${KAFKA_SASL_PASSWORD:-}" ] && [ -f "${BASE_DIR}/.env" ]; then
   fi
   unset _KAFKA_PW_FROM_ENV
 fi
-S3_HOST="${S3_HOST:-s3-hcm.sds.infiniband.vn}"
-NON_S3_HOST="${NON_S3_HOST:-vcr.infiniband.vn}"
 RESOLVE_IP="${RESOLVE_IP:-127.0.0.1}"
-REGION_TAG="${REGION_TAG:-${DC_PROFILE}}"
+
+# `.env` chỉ giữ PROJECT và DC_SITE. Script chạy tay tự dựng profile
+# giống Docker Compose, không đọc profile dựng sẵn từ `.env`.
+_PROJECT_FROM_ENV=""
+_DC_SITE_FROM_ENV=""
+if [ -f "${BASE_DIR}/.env" ]; then
+  _PROJECT_FROM_ENV=$(sed -n 's/^PROJECT=//p' "${BASE_DIR}/.env" | tail -1)
+  _DC_SITE_FROM_ENV=$(sed -n 's/^DC_SITE=//p' "${BASE_DIR}/.env" | tail -1)
+fi
+PROJECT="${PROJECT:-${_PROJECT_FROM_ENV:-}}"
+DC_SITE="${DC_SITE:-${_DC_SITE_FROM_ENV:-}}"
+if [ -z "$PROJECT" ] || [ -z "$DC_SITE" ]; then
+  echo "  [ERROR] Thiếu PROJECT hoặc DC_SITE. Set trong ${BASE_DIR}/.env hoặc export trước khi chạy." >&2
+  exit 2
+fi
+
+APISIX_PROFILE="${PROJECT}-${DC_SITE}"
+REGION_TAG="${REGION_TAG:-${DC_SITE}}"
+
+case "$PROJECT" in
+  internal)
+    # Internal dùng listener TLS thường, có Redis và redis-exporter.
+    PROXYV2_REQUIRED="${PROXYV2_REQUIRED:-0}"
+    DEFAULT_NON_S3_HOST="cmc.sds.infiniband.vn"
+    VERIFY_REDIS="${VERIFY_REDIS:-1}"
+    ;;
+  proxyhub)
+    # ProxyHub yêu cầu PROXY-v2 trước TLS; stack hiện không triển khai Redis/exporter.
+    PROXYV2_REQUIRED="${PROXYV2_REQUIRED:-1}"
+    PROXYV2_CLIENT="${PROXYV2_CLIENT:-scripts/debug/proxyv2-test-client.py}"
+    PROXYV2_NETWORK_ID="${PROXYV2_NETWORK_ID:-verify-${DC_SITE}}"
+    DEFAULT_NON_S3_HOST="vcr.infiniband.vn"
+    VERIFY_REDIS="${VERIFY_REDIS:-0}"
+    ;;
+  *)
+    echo "  [ERROR] PROJECT='$PROJECT' không được hỗ trợ (chỉ internal hoặc proxyhub)." >&2
+    exit 2
+    ;;
+esac
+
+S3_HOST="${S3_HOST:-s3-hcm.sds.infiniband.vn}"
+NON_S3_HOST="${NON_S3_HOST:-$DEFAULT_NON_S3_HOST}"
+echo "  [INFO] PROJECT=$PROJECT; DC_SITE=$DC_SITE; APISIX_PROFILE=$APISIX_PROFILE"
+
+# Áp bucket riêng theo region nếu có set (S3_TEST_BUCKET_HCM/S3_TEST_BUCKET_HAN), override
+# default chung — chỉ khi người dùng KHÔNG tự set S3_TEST_BUCKET tay.
+if [ "$S3_TEST_BUCKET" = "thuyldx-cloud" ]; then
+  REGION_BUCKET_VAR="S3_TEST_BUCKET_$(echo "$REGION_TAG" | tr '[:lower:]' '[:upper:]')"
+  REGION_BUCKET_VALUE="${!REGION_BUCKET_VAR:-}"
+  if [ -n "$REGION_BUCKET_VALUE" ]; then
+    S3_TEST_BUCKET="$REGION_BUCKET_VALUE"
+    echo "  [INFO] Dùng bucket riêng theo region: $REGION_BUCKET_VAR=$S3_TEST_BUCKET"
+  fi
+fi
+
+# S3_HOST/NON_S3_HOST cũng nên theo region đang đứng, không mặc định cứng về HCM
+if [ "$REGION_TAG" = "han" ] && [ "${S3_HOST}" = "s3-hcm.sds.infiniband.vn" ]; then
+  S3_HOST="s3-hni.sds.infiniband.vn"
+fi
+
 AWS_REGION="${AWS_REGION:-us-east-1}"
 S3_SERVICE="${S3_SERVICE:-s3}"
 LOKI_URL="${LOKI_URL:-https://maas-service-logs.infiniband.vn/loki/api/v1/query_range}"
@@ -121,11 +169,8 @@ LOKI_URL="${LOKI_URL:-https://maas-service-logs.infiniband.vn/loki/api/v1/query_
 KAFKA_BROKER="${KAFKA_BROKER:-172.26.24.80:31421}"
 KAFKA_SASL_USERNAME="${KAFKA_SASL_USERNAME:-apisix}"
 KAFKA_SASL_MECHANISM="${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}"
-KAFKA_TOPIC="${KAFKA_TOPIC:-apisix-${DC_PROFILE}}"
+KAFKA_TOPIC="${KAFKA_TOPIC:-apisix-gateway-${REGION_TAG}}"
 KAFKA_CA_CERT="${KAFKA_CA_CERT:-${BASE_DIR}/certs/ca-certificates.crt}"
-PROXYV2_CLIENT="${PROXYV2_CLIENT:-scripts/debug/proxyv2-test-client.py}"
-PROXYV2_NETWORK_ID="${PROXYV2_NETWORK_ID:-test-network-id-manual-verify}"
-PROXYV2_REQUIRED="${PROXYV2_REQUIRED:-1}"
 MIMIR_QUERY_URL="${MIMIR_QUERY_URL:-https://maas-service-metrics.infiniband.vn/prometheus/api/v1/query}"
 MIMIR_LABEL_URL="${MIMIR_LABEL_URL:-https://maas-service-metrics.infiniband.vn/prometheus/api/v1/label/__name__/values}"
 ORG_ID="${ORG_ID:-vnpaycloud}"
@@ -174,9 +219,21 @@ nextstep(){ colorize_cmds "$C_NEXTSTEP" "     Nếu FAIL: $1"; }
 section() { echo "${C_HEADER}################################################################${C_RESET}"; echo "${C_HEADER}# $1${C_RESET}"; echo "${C_HEADER}################################################################${C_RESET}"; }
 
 cd "$BASE_DIR" || { echo "BASE_DIR không tồn tại: $BASE_DIR"; exit 1; }
-section "1. PROXY-v2 + SNI"
 
-# ProxyHub không deploy Redis/redis-exporter; không chạy check này để tránh FAIL giả.
+section "1. RATE LIMIT + REDIS + SNI"
+
+if [ "$VERIFY_REDIS" = "1" ]; then
+  explain "Redis backend cho plugin limit-count (per-AKID counter)" \
+          "limit-count dùng Redis để đếm request theo akid; Redis down = rate-limit không hoạt động (fail-open hoặc fail-closed tuỳ config)."
+  nextstep "docker logs redis --tail 50; docker restart redis nếu cần"
+  if docker exec redis redis-cli ping 2>/dev/null | grep -q PONG; then
+    ok "redis PONG"
+  else
+    bad "redis không PONG"
+  fi
+else
+  warn "SKIP Redis: PROJECT=$PROJECT hiện không triển khai Redis/redis-exporter (không tạo FAIL giả)."
+fi
 
 explain "SNI-reject trên tầng TLS (ssl_client_hello_by_lua)" \
         "APISIX dùng SNI-based routing để chọn cert/route. Client bắn thẳng IP không kèm SNI sẽ bị reject NGAY tại TLS handshake, TRƯỚC khi vào access log/Prometheus — nên 2 hệ thống đó sẽ không bao giờ thấy event này."
@@ -192,12 +249,12 @@ fi
 
 explain "Cert coverage — mỗi SNI có trả về đúng cert cover host đó không, còn hạn bao lâu" \
         "Đây chính là điểm đã gây lỗi thật (cmc/s3-hcm/s3-hni.sds bị 'failed to match any SSL certificate by SNI' do thiếu cert *.sds.infiniband.vn). Verify bằng TLS handshake thật qua openssl s_client với --servername=SNI cần test, không suy đoán từ config YAML (YAML có thể đúng nhưng chưa merge/reload)."
-nextstep "Không có cert trả về -> kiểm tra SSL fragment và PROXY-v2 listener."
-CERT_CHECK_HOSTS="${CERT_CHECK_HOSTS:-${S3_HOST} ${NON_S3_HOST} s3-hcm.sds.infiniband.vn s3-hni.sds.infiniband.vn}"
-# Port 443 ProxyHub yêu cầu PROXY-v2 trước TLS; openssl direct sẽ fail đúng thiết kế.
-if [ "${PROXYV2_REQUIRED}" = "1" ]; then
+nextstep "Không có cert trả về -> route đó sẽ 000/SSL alert khi có SNI thật gọi vào, xem ssls section trong apisix_routes/ssls/*.yaml đã cover SNI này chưa. Cert hết hạn/sắp hết hạn -> gia hạn ngay, đừng chờ tới lúc cert hết hạn giữa production."
+CERT_CHECK_HOSTS="${CERT_CHECK_HOSTS:-${S3_HOST} ${NON_S3_HOST} s3-hcm.sds.infiniband.vn s3-hni.sds.infiniband.vn iam.sds.infiniband.vn s3-admin.sds.infiniband.vn}"
+# curl/openssl không gửi được PROXY-v2; với ProxyHub kiểm tra TLS/SNI bằng client chuyên dụng bên dưới.
+if [ "$PROXYV2_REQUIRED" = "1" ]; then
   CERT_CHECK_HOSTS=""
-  echo "  [INFO] SKIP openssl direct-cert check: ProxyHub yêu cầu PROXY-v2."
+  warn "SKIP openssl direct-cert check: listener ProxyHub yêu cầu PROXY-v2 trước TLS."
 fi
 # Dedupe danh sách host (S3_HOST có thể trùng với 1 trong các host mặc định)
 CERT_CHECK_HOSTS=$(echo "$CERT_CHECK_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
@@ -257,7 +314,7 @@ else:
 done
 
 explain "Dynamic route discovery — quét toàn bộ route ACTIVE trong merged config thật" \
-        "Route được quản lý qua gitsync, thêm/xoá liên tục — hardcode 1 route cố định (vd chỉ test 'cmc') sẽ bỏ sót route mới hoặc route khác đang lỗi. Đọc file merged apisix-\${APISIX_PROFILE}.yaml đang được APISIX mount; ProxyHub nhận diện S3 qua service/plugin-config."
+        "Route được quản lý qua gitsync, thêm/xoá liên tục — hardcode 1 route cố định (vd chỉ test 'cmc') sẽ bỏ sót route mới hoặc route khác đang lỗi. Đọc trực tiếp file merged apisix-\${APISIX_PROFILE}.yaml (đây là NGUỒN THẬT APISIX container đang chạy, không phải fragment riêng lẻ trong apisix_routes/), lọc status active, bỏ route lab/debug, tách route S3 data-plane (nhận diện qua plugin custom.s3-accesskey-extractor — plugin trích AKID để ký SigV4, KHÔNG dùng service_id/plugin_config_id string vì tên các resource này có thể đổi tuỳ convention team đang dùng, chỉ có plugin gắn trên route mới phản ánh đúng hành vi thật) khỏi route control-plane (test PLAIN không ký)."
 nextstep "Không tìm thấy file merged hoặc thiếu PyYAML -> set MERGED_CONFIG_FILE=<path> tay, hoặc pip install pyyaml --break-system-packages. Script tự fallback về NON_S3_HOST/S3_HOST tĩnh nếu discovery fail, không chặn phần còn lại chạy."
 
 MERGED_CONFIG_FILE="${MERGED_CONFIG_FILE:-}"
@@ -304,9 +361,8 @@ for r in routes:
             skipped_wildcard_only.append(rid)
         continue
     svc = r.get('service_id', '')
-    plugin_config_id = r.get('plugin_config_id', '')
-    is_s3_sdk = (svc.startswith('service-upstream-s3-')
-                 or plugin_config_id.startswith('plugin-config-s3-bucket-guard'))
+    plugins = r.get('plugins') or {}
+    is_s3_sdk = 'custom.s3-accesskey-extractor' in plugins
     for h in hosts:
         if is_s3_sdk:
             s3.add(h)
@@ -362,27 +418,30 @@ fi
 [ -z "$CONTROL_HOSTS" ] && CONTROL_HOSTS="$NON_S3_HOST"
 [ -z "$S3_ROUTE_HOSTS" ] && S3_ROUTE_HOSTS="$S3_HOST"
 
-if [ "${PROXYV2_REQUIRED}" = "1" ]; then
+if [ "$PROXYV2_REQUIRED" = "1" ]; then
   explain "PROXY-v2 smoke test trên các route phát hiện được" \
           "Port 443 yêu cầu PROXY-v2 trước TLS. Có HTTP response là TCP, PROXY-v2, TLS/SNI và route đã chạy."
   nextstep "Kiểm tra config-proxyhub.yaml, SNI/cert, route và global-abuse-guard."
 
-  for host in $CONTROL_HOSTS $S3_ROUTE_HOSTS; do
-    [ -z "$host" ] && continue
-    PROXYV2_OUTPUT=$(timeout 15 python3 "$PROXYV2_CLIENT" "$host" \
-      "$PROXYV2_NETWORK_ID" "/" 443 2>&1)
-    PROXYV2_STATUS=$(printf '%s\n' "$PROXYV2_OUTPUT" |
-      awk '/^HTTP\/[0-9.]+ [0-9]{3}/ { print $2; exit }')
-    if [ -n "$PROXYV2_STATUS" ] &&
-       [ "$PROXYV2_STATUS" -lt 500 ]; then
-      ok "$host — PROXY-v2 + TLS/SNI + route trả HTTP $PROXYV2_STATUS"
-    else
-      bad "$host — PROXY-v2 smoke test lỗi (HTTP=${PROXYV2_STATUS:-none})"
-      printf '%s\n' "$PROXYV2_OUTPUT" | tail -5 | sed 's/^/    /'
-    fi
-  done
+  if ! command -v python3 >/dev/null 2>&1 || [ ! -f "$PROXYV2_CLIENT" ]; then
+    bad "Thiếu PROXY-v2 client: cần python3 và file $PROXYV2_CLIENT"
+  else
+    for host in $CONTROL_HOSTS $S3_ROUTE_HOSTS; do
+      [ -z "$host" ] && continue
+      PROXYV2_OUTPUT=$(timeout 15 python3 "$PROXYV2_CLIENT" "$host" \
+        "$PROXYV2_NETWORK_ID" "/" 443 2>&1)
+      PROXYV2_STATUS=$(printf '%s\n' "$PROXYV2_OUTPUT" |
+        awk '/^HTTP\/[0-9.]+ [0-9]{3}/ { print $2; exit }')
+      if [ -n "$PROXYV2_STATUS" ] && [ "$PROXYV2_STATUS" -lt 500 ]; then
+        ok "$host — PROXY-v2 + TLS/SNI + route trả HTTP $PROXYV2_STATUS"
+      else
+        bad "$host — PROXY-v2 smoke test lỗi (HTTP=${PROXYV2_STATUS:-none})"
+        printf '%s\n' "$PROXYV2_OUTPUT" | tail -5 | sed 's/^/    /'
+      fi
+    done
+  fi
 
-  # curl/openssl không gửi PROXY-v2; tránh HTTP=000 giả.
+  # Không chạy curl/SigV4 trực tiếp để tránh HTTP=000 giả trên listener bắt buộc PROXY-v2.
   CONTROL_HOSTS=""
   S3_ROUTE_HOSTS=""
   warn "SKIP direct curl/SigV4: listener ProxyHub yêu cầu PROXY-v2."
@@ -409,7 +468,7 @@ for host in $CONTROL_HOSTS; do
     SNI_MISMATCH=$(grep "failed to match any SSL certificate by SNI: ${host}" logs/apisix/error.log 2>/dev/null | tail -1)
     if [ -n "$SNI_MISMATCH" ]; then
       MATCHED_SNIS=$(echo "$SNI_MISMATCH" | grep -oE 'matched SNIs: \[[^]]*\]')
-      bad "$host — HTTP=000 do SSL CERT KHÔNG COVER đúng SNI (${MATCHED_SNIS:-xem error.log}) — lỗi CONFIG cert, KHÔNG PHẢI mạng/timeout. Fix: kiểm tra ssls trong apisix-${APISIX_PROFILE}.yaml"
+      bad "$host — HTTP=000 do SSL CERT KHÔNG COVER đúng SNI (${MATCHED_SNIS:-xem error.log}) — lỗi CONFIG cert, KHÔNG PHẢI mạng/timeout. Fix: thêm SAN đích danh trong ssls của apisix-${APISIX_PROFILE}.yaml"
     else
       bad "$host — HTTP=000 nhưng KHÔNG thấy SNI-mismatch trong error.log — nghi timeout/connection thật, không phải cert. Check network/firewall tới upstream."
     fi
@@ -431,8 +490,8 @@ if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
   SIGV4_SUPPORTED=0
 fi
 
-explain "Route S3 data-plane — test SigV4 trên TẤT CẢ host phát hiện được" \
-        "Route S3 ProxyHub không dùng key-auth. Khi PROXYV2_REQUIRED=1, vòng curl này được skip vì curl không gửi được PROXY-v2; transport/routing đã được test bằng proxyv2-test-client.py."
+explain "Route S3 data-plane (service_id=svc-s3-sdk) — test SigV4 trên TẤT CẢ host phát hiện được" \
+        "QUAN TRỌNG: route S3 KHÔNG dùng key-auth (comment trong apisix_routes/apisix-*.yaml ghi rõ '⚠ CHỈ cho API control-plane CÓ key-auth. KHÔNG dùng cho S3 data-plane'). S3 SDK/client chỉ được xác thực qua chữ ký SigV4/SigV2 ở tầng plugin custom.s3-accesskey-extractor, KHÔNG có concept 'apikey' header ở route này. Test với header apikey vào route S3 LUÔN sai hướng — không dùng lại pattern đó."
 for s3host in $S3_ROUTE_HOSTS; do
   echo "  -- Host: $s3host --"
   if [ "$SIGV4_SUPPORTED" -eq 1 ]; then
@@ -489,7 +548,7 @@ section "2. LOG (route: TẤT CẢ, qua global-loki-logger)"
 
 explain "access.log JSON format (route + service context)" \
         "loki-logger global rule chỉ gửi access.log (không gửi error.log) lên Loki — field route_id/service_id/akid/rt_limit/rt_remaining phải có đủ để audit theo route."
-nextstep "Field thiếu -> check log_format trong config-proxyhub.yaml và global-abuse-guard, serverless-pre-function có inject đủ header X-Route-Id/X-Service-Id không."
+nextstep "Field thiếu -> check runtime config-${APISIX_PROFILE}.yaml, serverless-pre-function có inject đủ header X-Route-Id/X-Service-Id không."
 tail -1 logs/apisix/access.log 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "  KHÔNG parse được access.log line cuối"
 LAST_LOG=$(tail -1 logs/apisix/access.log 2>/dev/null)
 for field in route_id service_id akid rt_limit rt_remaining rt_warning; do
@@ -576,7 +635,7 @@ fi
 
 explain "End-to-end — message thật sự tới được Kafka topic '$KAFKA_TOPIC' chưa (dùng kcat)" \
         "3 check trên chỉ xác nhận layer TLS/patch/log-error riêng lẻ — đây là bước duy nhất xác nhận round-trip THẬT: APISIX ghi log qua kafka-logger -> broker nhận -> consume lại được. Cần KAFKA_SASL_PASSWORD + kcat, cả 2 đều optional (không block phần còn lại của script nếu thiếu)."
-nextstep "Consume rỗng dù broker reachable -> kiểm tra topic apisix-\${DC_PROFILE}, hoặc global-kafka-logger.yaml vừa mới bật (cần đợi 1 request thật đi qua route trước khi có message)."
+nextstep "Consume rỗng dù broker reachable -> kiểm tra topic name đúng theo DC_SITE chưa (apisix-gateway-\${DC_SITE}), hoặc global-kafka-logger.yaml vừa mới bật (cần đợi 1 request thật đi qua route trước khi có message)."
 if ! command -v kcat >/dev/null 2>&1; then
   warn "Không có kcat trong PATH — SKIP end-to-end test (cài: apt install kafkacat, hoặc dùng kcat binary tĩnh)"
 elif [ -z "${KAFKA_SASL_PASSWORD:-}" ]; then
@@ -602,12 +661,18 @@ fi
 hr
 section "3. METRIC"
 
-explain "APISIX prometheus endpoint (9091)" \
-        "ProxyHub không deploy redis-exporter; chỉ kiểm tra APISIX metrics."
+explain "APISIX prometheus endpoint (9091) và redis_exporter (9121 nếu có)" \
+        "APISIX metrics luôn phải có; redis-exporter chỉ là nguồn scrape bắt buộc ở stack có Redis."
 curl -s "${CURL_TO[@]}" http://127.0.0.1:9091/apisix/prometheus/metrics | grep "^apisix_http" | head -5
+if [ "$VERIFY_REDIS" = "1" ]; then
+  curl -s "${CURL_TO[@]}" http://127.0.0.1:9121/metrics | grep "^redis_up"
+else
+  warn "SKIP redis_exporter: PROJECT=$PROJECT không triển khai Redis."
+fi
+
 explain "Prometheus container scrape targets health" \
-        "job_name phải tách theo region (apisix-${REGION_TAG}-metric) — do entrypoint sed substitute \${DC_PROFILE}. Nếu job_name generic (không có hậu tố region) nghĩa là substitute chưa chạy."
-nextstep "docker logs prometheus | grep -i sed; check docker-compose entrypoint script substitute \${DC_PROFILE} đúng biến môi trường chưa."
+        "job_name phải tách theo region (apisix-${REGION_TAG}-metric) — do entrypoint sed substitute \${DC_SITE}. Nếu job_name generic (không có hậu tố region) nghĩa là substitute chưa chạy."
+nextstep "docker logs prometheus | grep -i sed; check docker-compose entrypoint script substitute \${DC_SITE} đúng biến môi trường chưa."
 docker ps | grep prometheus || bad "container prometheus không chạy"
 TARGETS_RAW=$(curl -s "${CURL_TO[@]}" http://127.0.0.1:9099/api/v1/targets)
 echo "$TARGETS_RAW" | python3 -c "
@@ -618,7 +683,7 @@ for t in d.get('data', {}).get('activeTargets', []):
 " 2>/dev/null
 EXPECTED_JOB="apisix-${REGION_TAG}-metric"
 if echo "$TARGETS_RAW" | grep -q "\"$EXPECTED_JOB\""; then
-  ok "job_name '$EXPECTED_JOB' xuất hiện — DC_PROFILE substitute OK"
+  ok "job_name '$EXPECTED_JOB' xuất hiện — DC_SITE substitute OK"
 else
   bad "job_name '$EXPECTED_JOB' KHÔNG thấy"
 fi
@@ -727,7 +792,7 @@ fi
 hr
 section "5. CONTAINERS"
 
-explain "Toàn bộ container stack (apisix-standalone, gitsync, prometheus, dashboard, vnpay-adc)" \
+explain "Toàn bộ container stack" \
         "Baseline cuối cùng — nếu container nào unhealthy thì mọi kết quả PASS ở các mục trên đều cần nghi ngờ lại (có thể data đã stale)."
 nextstep "docker logs <container> --tail 50; docker restart <container>"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"

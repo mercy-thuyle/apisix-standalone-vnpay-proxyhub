@@ -29,7 +29,7 @@
 │                                                  admin copy về local file này và deploy thủ công (lint syntax, logic, dry-run, restart docker container...
 │                                                  hoặc combo systemd watcher theo dõi + tự động restart docker container)
 │
-├── apisix_routes/                               ← thư mục gốc chứa fragment, merge thành apisix-proxyhub.yaml bởi merge-fragments.sh
+├── apisix_routes/                                ← thư mục gốc chứa toàn bộ fragments, được merge thành apisix-${APISIX_PROFILE}.yaml bởi merge-fragments.sh
 │   ├── global_rules/                            ← guard + chuẩn hoá header, áp cho MỌI route, FLAT
 │   │   └── <rule-id>.yaml                       ← 1 file = 1+ global_rule, key bắt buộc: "global_rules:"
 │   │                                              vd: global-network-identity.yaml (X-Network-Id/X-Client-IP
@@ -146,13 +146,13 @@
 │   │   ├── 3-decrypt-certs.sh                   ← chạy 1 lần khi deploy hoặc đổi cert
 │   │   └── deploy.sh                            ← entry point: patch lua → decrypt certs → compose up
 │   ├── libraries/                               ← shared lib, không chạy trực tiếp
-│   │   ├── cert-list-domains.txt                ← danh sách domain cần inject cert vào apisix-proxyhub.yaml, lib dùng chung cho 2-decrypt-certs.sh và 3-inject-certs.sh
+│   │   ├── cert-list-domains.txt                ← danh sách domain cần inject cert vào apisix-${APISIX_PROFILE}.yaml, lib dùng chung cho 2-decrypt-certs.sh và 3-inject-certs.sh
 │   │   ├── decrypt-cert-helper.sh               ← CERT_DOMAINS array — nguồn duy nhất domain nào cần cert (dùng bởi 3-decrypt-certs.sh), kèm override filename cho domain đặt tên khác convention (SRC_CERT_FILE/SRC_KEY_ENC_FILE, vd cmc.sds.infiniband.vn copy nguyên tên từ nginx)
 │   │   └── profile-map.yaml                      ← khai subfolder nào trong routes/upstreams thuộc DC profile nào (hcm/hni,han/*), dùng bởi merge-fragments.sh — subfolder chưa khai → mặc định shared (*) + WARNING, không block merge
 │   └── runtime/                                 ← được mount vào gitsync container, trigger tự động sau mỗi git sync
 │       ├── gitsync.sh                           ← exechook của git-sync, detect layout và gọi merge-fragments.sh
 │       ├── inject-certs.sh                      ← chạy 1 lần khi deploy hoặc đổi cert
-│       └── merge-fragments.sh                   ← validate + gộp upstreams/routes/ssls thành apisix-proxyhub.yaml
+│       └── merge-fragments.sh                   ← validate + gộp upstreams/routes/ssls thành apisix-${APISIX_PROFILE}.yaml
 │
 
 ├── secrets/
@@ -167,7 +167,7 @@
 ├── config_yaml.lua                               ← patched — thay đổi log warning mặc định của APISIX khi hot-reload
 ├── config_yaml.lua.orig                          ← bản gốc extract từ image, dùng để diff khi upgrade APISIX version
 ├── .yamllint.yaml                               ← yamllint rule config — nới lỏng line-length/comment style, giữ error cho trailing-spaces/key-duplicates/newline
-├── .env                                         ← DC_PROFILE=proxyhub và CERT_PASSPHRASE cho encrypt/decrypt (có trong .gitignore, KHÔNG commit)
+├── .env                                         ← PROJECT=internal, DC_SITE=hcm | han và CERT_PASSPHRASE cho encrypt/decrypt (có trong .gitignore, KHÔNG commit)
 ├── .gitignore
 ├── redis.conf                                   ← artifact cho cấu hình của redis local
 ├── prometheus.yaml                              ← artifact cho cấu hình của prometheus exporter đến mimir
@@ -280,8 +280,8 @@ openssl rand -base64 32
 openssl rand -hex 32
 
 cat > .env << 'EOF'
-APISIX_PROFILE=proxyhub
-DC_PROFILE=hcm
+PROJECT=proxyhub
+DC_SITE=hcm
 ORDER_NUM=1     # số thứ tự của instance ví dụ 1,2,3,... khi kết hợp sẽ thành hcm-1, han-2,...
 CERT_PASSPHRASE=<random-strong-passphrase>
 KAFKA_SASL_USER=apisix
@@ -398,7 +398,7 @@ chmod 644 certs/<fqdn>.cert
 
 ## Hot-reload (không cần restart)
 
-Commit thay đổi vào `apisix_routes/apisix-proxyhub.yaml` trên GitLab → git-sync pull về trong ≤30s → APISIX hot-reload tự động.
+Commit thay đổi vào `apisix_routes/apisix-${APISIX_PROFILE}.yaml` trên GitLab → git-sync pull về trong ≤30s → APISIX hot-reload tự động.
 
 ## Cần restart
 
