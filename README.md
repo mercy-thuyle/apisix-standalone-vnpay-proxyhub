@@ -587,7 +587,7 @@ Không load (bỏ khỏi plugins list): ua-restriction, referer-restriction, jwt
 | `did not find expected key` (lyaml parse error) | did not find expected key (lyaml parse error) | Chạy `yamllint apisix_routes/apisix-proxyhub.yaml` → fix trailing spaces, duplicate key |
 | gitsync overwrite file sau khi sửa local | git pull báo conflict permission 100644 → 100755 | Mọi thay đổi phải commit lên git — không sửa file local trực tiếp |
 | `git pull` báo conflict permission `100644 → 100755` | git pull báo conflict permission 100644 → 100755 | `git config core.fileMode false` một lần là xong |
-| Container crash loop | Volume mount sai tên file | Kiểm tra tên file khớp `DC_PROFILE` |
+| Container crash loop | Volume mount sai tên file | Kiểm tra tên file khớp `APISIX_PROFILE` |
 | APISIX không hot-reload dù file đã thay đổi | exechook fail → file không được copy | `docker logs gitsync --tail 20 \| grep "hook failed"` |
 | `missing valid end flag` | File thiếu `#END` hoặc YAML lỗi | Fix file → hot-reload tự động, KHÔNG restart |
 | `failed to open file: config-proxyhub.yaml` | Volume mount sai tên | Tên file phải có profile suffix `-hcm` |

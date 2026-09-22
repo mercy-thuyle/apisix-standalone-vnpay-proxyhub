@@ -1,6 +1,6 @@
 #!/bin/sh
 
-if [ -z "${DC_PROFILE:-}" ]; then
+if [ -z "${PROJECT:-}" ]; then
     DEPLOY_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
     if [ -f "${DEPLOY_DIR}/.env" ]; then
         # Dùng sed để parse .env — không cần bash/source
