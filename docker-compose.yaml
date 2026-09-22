@@ -60,7 +60,7 @@ services:
       # GITSYNC_SCOPE_TARGET: "master"
     env_file: .env
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/apisix_routes/apisix-${APISIX_PROFILE}.yaml"]
+      test: ["CMD", "test -f /tmp/apisix_routes/apisix-${APISIX_PROFILE}.yaml"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -97,7 +97,7 @@ services:
     entrypoint: ["/bin/sh", "/usr/local/bin/vnpay-adc"]
     healthcheck:
       # Không chỉ kiểm tra mount tồn tại; controller phải cập nhật heartbeat.
-      test: ["CMD-SHELL", "test -f /tmp/adc/heartbeat-$${DC_SITE} && test $$(( $$(date +%s) - $$(cat /tmp/adc/heartbeat-$${DC_SITE}) )) -le 120"]
+      test: ["CMD", "test -f /tmp/adc/heartbeat-$${DC_SITE} && test $$(( $$(date +%s) - $$(cat /tmp/adc/heartbeat-$${DC_SITE}) )) -le 120"]
       interval: 15s
       timeout: 5s
       retries: 5
