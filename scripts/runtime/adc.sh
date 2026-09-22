@@ -166,6 +166,9 @@ validate() {
   log "OK — Lua syntax"
 
   if ! apisix init > "${work}/apisix-init.log" 2>&1; then
+    log "FAIL — apisix init; xem ${work}/apisix-init.log"
+    tail -n 40 "${work}/apisix-init.log" \
+      | sed 's/^/[adc] apisix-init: /' >&2 || true
     result "${commit}" FAIL "apisix init failed"
     return
   fi
