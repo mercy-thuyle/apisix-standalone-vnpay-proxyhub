@@ -280,6 +280,7 @@ openssl rand -base64 32
 openssl rand -hex 32
 
 cat > .env << 'EOF'
+APISIX_PROFILE=
 PROJECT=proxyhub
 DC_SITE=hcm
 ORDER_NUM=1     # số thứ tự của instance ví dụ 1,2,3,... khi kết hợp sẽ thành hcm-1, han-2,...
