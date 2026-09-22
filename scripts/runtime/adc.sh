@@ -108,9 +108,16 @@ validate() {
   fi
   log "OK — merge fragments"
 
-  # Dựng private view APISIX của validator từ checkout candidate.
-  # Một static config chung trong repo; APISIX vẫn đọc đúng tên theo profile.
-  cp "${SYNC_SRC}/apisix_config/config-internal.yaml" \
+  # Static config nguồn theo PROJECT; APISIX vẫn đọc đúng tên runtime theo profile.
+  # internal  -> config-internal.yaml
+  # proxyhub  -> config-proxyhub.yaml
+  CONFIG_SOURCE="${SYNC_SRC}/apisix_config/config-${PROJECT}.yaml"
+  if [ ! -s "${CONFIG_SOURCE}" ]; then
+    log "FAIL — không tìm thấy static config: ${CONFIG_SOURCE}"
+    result "${commit}" FAIL "static config missing: config-${PROJECT}.yaml"
+    return
+  fi
+  cp "${CONFIG_SOURCE}" \
      "/usr/local/apisix/conf/config-${APISIX_PROFILE}.yaml"
   cp "${work}/apisix-${APISIX_PROFILE}.yaml" \
      "/usr/local/apisix/conf/apisix-${APISIX_PROFILE}.yaml"
