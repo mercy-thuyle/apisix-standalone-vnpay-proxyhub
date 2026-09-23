@@ -13,7 +13,21 @@ routes:
     #   - ["scheme", "==", "http"]
     #   - ["remote_addr", "!=", "172.26.29.231"]
 
-    # plugins:
+    plugins:
+      serverless-pre-function:
+        phase: access
+        functions:
+          - |
+            return function(conf, ctx)
+              -- APISIX nginx template tự set X-Forwarded-Port khi
+              -- proxy_pass. Cloudian S3 nhận request SigV4 qua ProxyHub
+              -- trả SignatureDoesNotMatch khi header này xuất hiện
+              -- sau lúc client đã ký request.
+              --
+              -- Gán biến nginx rỗng ở access phase để outbound hop
+              -- ProxyHub -> Internal S3 APISIX không có header này.
+              ngx.var.var_x_forwarded_port = ""
+            end
 
     #   custom.s3-normalizer-bucket-name:
     #     path_hosts:
@@ -47,7 +61,21 @@ routes:
     #   - ["scheme", "==", "http"]
     #   - ["remote_addr", "!=", "172.26.29.231"]
 
-    # plugins:
+    plugins:
+      serverless-pre-function:
+        phase: access
+        functions:
+          - |
+            return function(conf, ctx)
+              -- APISIX nginx template tự set X-Forwarded-Port khi
+              -- proxy_pass. Cloudian S3 nhận request SigV4 qua ProxyHub
+              -- trả SignatureDoesNotMatch khi header này xuất hiện
+              -- sau lúc client đã ký request.
+              --
+              -- Gán biến nginx rỗng ở access phase để outbound hop
+              -- ProxyHub -> Internal S3 APISIX không có header này.
+              ngx.var.var_x_forwarded_port = ""
+            end
 
     #   custom.s3-normalizer-bucket-name:
     #     path_hosts:
