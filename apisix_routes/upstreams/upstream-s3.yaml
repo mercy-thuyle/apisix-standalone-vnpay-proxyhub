@@ -15,7 +15,7 @@ upstreams:
     checks:
       active:
         type: "https"
-        # host: "s3-hcm.sds.infiniband.vn"
+        host: "s3-hcm.sds.infiniband.vn"
         http_path: "/"
         https_verify_certificate: false
         req_headers:
@@ -99,7 +99,7 @@ upstreams:
     checks:
       active:
         type: "https"
-        # host: "s3-hni.sds.infiniband.vn"
+        host: "s3-hni.sds.infiniband.vn"
         http_path: "/"
         https_verify_certificate: false
         req_headers:
