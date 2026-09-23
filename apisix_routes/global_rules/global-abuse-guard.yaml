@@ -64,12 +64,27 @@ global_rules:
               -- X-Client-IP thay thế. Layer nào thật sự cần BẮT BUỘC network_id (vd
               -- s3-network-bucket-guard) phải tự fail-closed riêng khi thiếu header, guard
               -- này không còn là nơi enforce duy nhất.
-              local network_id = ngx.var.proxy_protocol_tlv_unique_id
-              if network_id and network_id ~= "" then
-                ngx.req.set_header("X-Network-Id", network_id)
-              else
-                ngx.req.clear_header("X-Network-Id")
-              end
+            
+              -- Tạm thời tắt policy bucket theo network identity: không inject
+              -- X-Network-Id từ PROXY-v2 TLV. Bucket guard sẽ bypass Vault
+              -- allowlist khi header này không tồn tại; Cloudian xử lý quyền
+              -- bucket/object qua SigV4.
+              --
+              -- Khi cần bật lại bucket allowlist, thay ngx.req.clear_header(...)
+              -- bên dưới bằng block này:
+              --
+              -- local network_id = ngx.var.proxy_protocol_tlv_unique_id
+              -- if network_id and network_id ~= "" then
+              --   ngx.req.set_header("X-Network-Id", network_id)
+              -- else
+              --   ngx.req.clear_header("X-Network-Id")
+              -- end
+              --
+              -- Clear chủ động để không nhận cả X-Network-Id do client tự gửi.
+              ngx.req.clear_header("X-Network-Id")
+ 
+              -- Chỉ phục vụ quan sát/debug; không còn được bucket guard dùng
+              -- làm Vault identity fallback.
 
               ngx.req.set_header("X-Client-IP", ngx.var.remote_addr)
             end
