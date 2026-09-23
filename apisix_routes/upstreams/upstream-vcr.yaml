@@ -16,7 +16,7 @@ upstreams:
       active:
         type: "https"
         # host: "vcr.infiniband.vn"
-        http_path: "/"
+        http_path: "/api/v2.0/health"
         https_verify_certificate: false
         req_headers:
           - "User-Agent: APISIX-HealthCheck"
