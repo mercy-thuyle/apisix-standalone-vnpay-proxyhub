@@ -15,18 +15,15 @@ routes:
 
     plugins:
       serverless-pre-function:
-        phase: access
+        phase: before_proxy
         functions:
           - |
             return function(conf, ctx)
-              -- APISIX nginx template tự set X-Forwarded-Port khi
-              -- proxy_pass. Cloudian S3 nhận request SigV4 qua ProxyHub
-              -- trả SignatureDoesNotMatch khi header này xuất hiện
-              -- sau lúc client đã ký request.
+              -- SigV4 request đã được client ký trước khi vào ProxyHub.
+              -- Không forward X-Forwarded-Port tới Internal S3 APISIX.
               --
-              -- Gán biến nginx rỗng ở access phase để outbound hop
-              -- ProxyHub -> Internal S3 APISIX không có header này.
-              ngx.var.var_x_forwarded_port = ""
+              -- before_proxy chạy ngay trước khi APISIX gửi upstream.
+              ngx.req.clear_header("X-Forwarded-Port")
             end
 
     #   custom.s3-normalizer-bucket-name:
