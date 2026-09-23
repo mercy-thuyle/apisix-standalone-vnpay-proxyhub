@@ -1,17 +1,19 @@
 #!/bin/sh
 
-if [ -z "${PROJECT:-}" ]; then
+set -eu
+
+if [ -z "${PROJECT:-}" ] || [ -z "${DC_SITE:-}" ]; then
     DEPLOY_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+
     if [ -f "${DEPLOY_DIR}/.env" ]; then
         # Dùng sed để parse .env — không cần bash/source
         eval "$(sed -n 's/^[^#][^=]*=.*/export &/p' "${DEPLOY_DIR}/.env")"
     fi
 fi
 
-set -eu
+: "${PROJECT:?PROJECT is required}"
+: "${DC_SITE:?DC_SITE is required}"
 
-PROJECT="${PROJECT:?PROJECT is required}"
-DC_SITE="${DC_SITE:?DC_SITE is required}"
 APISIX_PROFILE="${PROJECT}-${DC_SITE}"
 
 # ── Resolve paths — dùng deployment dir khi chạy local ───────────────────
