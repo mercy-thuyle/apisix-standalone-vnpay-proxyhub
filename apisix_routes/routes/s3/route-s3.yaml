@@ -15,10 +15,11 @@ routes:
 
     plugins:
       # Không gửi X-Forwarded-Port lên APISIX S3 → Cloudian: Cloudian dùng XFP khi tính lại SigV4, có header là 403 SignatureDoesNotMatch (A/B: direct-xfp443 → 403).
-      # Cần đủ 2 lệnh: ngx_tpl luôn proxy_set_header X-Forwarded-Port $var_x_forwarded_port (mặc định $server_port=443),
-      # và init.lua set_upstream_x_forwarded_headers() chạy SAU access plugins, ghi đè var này bằng http_x_forwarded_port nếu header còn.
-      # → xóa header (đồng thời clear cache ctx.var) để hàm trên không ghi đè, rồi gán var rỗng: nginx không gửi header có giá trị rỗng.
-      # Trước đây sai: chỉ clear_header ở before_proxy hoặc chỉ gán var ở access → đều bị ghi đè, XFP=443 vẫn đi ra upstream.
+      # Cần đủ 3 lệnh: ngx_tpl luôn proxy_set_header X-Forwarded-Port $var_x_forwarded_port (mặc định $server_port=443);
+      # init.lua set_upstream_x_forwarded_headers() chạy SAU access plugins, ghi đè var này bằng ctx.var.http_x_forwarded_port —
+      # giá trị CACHE =443 do handle_x_forwarded_headers() gán (client không thuộc trusted_addresses).
+      # core.request.set_header(nil) chỉ xóa header thật + clear cache key "http_x-forwarded-port" (giữ dấu '-'), KHÔNG clear key "http_x_forwarded_port"
+      # → phải gán thẳng cache = "" để hàm trên ghi var_x_forwarded_port rỗng; nginx không gửi header có giá trị rỗng. Thiếu 1 trong 3 lệnh → XFP=443 vẫn ra upstream.
       # Xóa block này: mọi request S3 qua ProxyHub lại 403 SignatureDoesNotMatch.
       serverless-pre-function:
         phase: access
@@ -27,7 +28,8 @@ routes:
             return function(conf, ctx)
               local core = require("apisix.core")
               core.request.set_header(ctx, "X-Forwarded-Port", nil)
-              ngx.var.var_x_forwarded_port = ""
+              ctx.var.http_x_forwarded_port = ""
+              ctx.var.var_x_forwarded_port = ""
             end
 
     #   custom.s3-normalizer-bucket-name:
@@ -63,19 +65,22 @@ routes:
     #   - ["remote_addr", "!=", "172.26.29.231"]
 
     plugins:
+      # Không gửi X-Forwarded-Port lên APISIX S3 → Cloudian: Cloudian dùng XFP khi tính lại SigV4, có header là 403 SignatureDoesNotMatch (A/B: direct-xfp443 → 403).
+      # Cần đủ 3 lệnh: ngx_tpl luôn proxy_set_header X-Forwarded-Port $var_x_forwarded_port (mặc định $server_port=443);
+      # init.lua set_upstream_x_forwarded_headers() chạy SAU access plugins, ghi đè var này bằng ctx.var.http_x_forwarded_port —
+      # giá trị CACHE =443 do handle_x_forwarded_headers() gán (client không thuộc trusted_addresses).
+      # core.request.set_header(nil) chỉ xóa header thật + clear cache key "http_x-forwarded-port" (giữ dấu '-'), KHÔNG clear key "http_x_forwarded_port"
+      # → phải gán thẳng cache = "" để hàm trên ghi var_x_forwarded_port rỗng; nginx không gửi header có giá trị rỗng. Thiếu 1 trong 3 lệnh → XFP=443 vẫn ra upstream.
+      # Xóa block này: mọi request S3 qua ProxyHub lại 403 SignatureDoesNotMatch.
       serverless-pre-function:
         phase: access
         functions:
           - |
             return function(conf, ctx)
-              -- APISIX nginx template tự set X-Forwarded-Port khi
-              -- proxy_pass. Cloudian S3 nhận request SigV4 qua ProxyHub
-              -- trả SignatureDoesNotMatch khi header này xuất hiện
-              -- sau lúc client đã ký request.
-              --
-              -- Gán biến nginx rỗng ở access phase để outbound hop
-              -- ProxyHub -> Internal S3 APISIX không có header này.
-              ngx.var.var_x_forwarded_port = ""
+              local core = require("apisix.core")
+              core.request.set_header(ctx, "X-Forwarded-Port", nil)
+              ctx.var.http_x_forwarded_port = ""
+              ctx.var.var_x_forwarded_port = ""
             end
 
     #   custom.s3-normalizer-bucket-name:
