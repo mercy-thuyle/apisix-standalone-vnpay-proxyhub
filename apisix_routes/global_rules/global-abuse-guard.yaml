@@ -159,5 +159,8 @@ global_rules:
               -- Chỉ phục vụ quan sát/debug; không còn được bucket guard dùng
               -- làm Vault identity fallback.
 
-              ngx.req.set_header("X-Client-IP", ngx.var.remote_addr)
+              -- A/B test SigV4 qua ProxyHub:
+              -- Không inject danh tính client vào request S3.
+              -- X-Network-Id vẫn đang được clear ở logic phía trên.
+              ngx.req.clear_header("X-Client-IP")
             end

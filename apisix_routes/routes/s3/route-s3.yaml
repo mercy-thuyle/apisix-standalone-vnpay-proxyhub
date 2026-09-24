@@ -20,21 +20,26 @@ routes:
           - |
             return function(conf, ctx)
               local headers_before = ngx.req.get_headers()
-              local before = headers_before["x-forwarded-port"] or "-"
+              local xfp_before = headers_before["x-forwarded-port"] or "-"
+              local client_ip_before = headers_before["x-client-ip"] or "-"
 
               -- SigV4 request đã được client ký trước khi vào ProxyHub.
               -- Không forward X-Forwarded-Port tới Internal S3 APISIX.
               ngx.req.clear_header("X-Forwarded-Port")
+              ngx.req.clear_header("X-Client-IP")
 
               local headers_after = ngx.req.get_headers()
-              local after = headers_after["x-forwarded-port"] or "-"
+              local xfp_after = headers_after["x-forwarded-port"] or "-"
+              local client_ip_after = headers_after["x-client-ip"] or "-"
 
               ngx.log(
                 ngx.WARN,
                 "[S3-SIGV4-OUTBOUND-TRACE] phase=before_proxy",
                 " route=", ctx.matched_route and ctx.matched_route.value.id or "-",
-                " x_forwarded_port_before=", before,
-                " x_forwarded_port_after=", after
+                " x_forwarded_port_before=", xfp_before,
+                " x_forwarded_port_after=", xfp_after,
+                " x_client_ip_before=", client_ip_before,
+                " x_client_ip_after=", client_ip_after
               )
             end
 
