@@ -36,30 +36,41 @@ global_rules:
       serverless-pre-function:
         phase: rewrite
         functions:
-          # ======================================================================
-          # [FUNC 1] HDR-DUMP — dump toàn bộ header ProxyHub nhận được (DEBUG TẠM)
-          # Đặt ĐẦU TIÊN để "parsed" phản ánh header trước khi FUNC 2 set/clear
-          # X-Node-Id/X-Route-Id/X-Network-Id/X-Client-IP. Gỡ cả function này sau
-          # khi debug xong: log MỌI request và lộ Authorization vào error.log.
-          # ======================================================================
+          # [FUNC 1] DEBUG-DUMP — header THÔ client gửi, đọc thẳng (DEBUG TẠM)
+          # - error.log : 1 dòng BEGIN (route/IP/port) + 1 dòng cho MỖI header, vì nginx cắt
+          #               mọi message error.log ở 2048 byte — dồn cả request vào 1 dòng sẽ mất đuôi.
+          #               Các dòng cùng request chung giá trị request_id ở cuối dòng.
+          # - access.log: field "debug_dump" = toàn bộ header nối bằng " | " (access.log không bị
+          #               giới hạn 2048 byte). Cần biến $debug_dump khai báo trong config-proxyhub.yaml.
+          # Đặt ĐẦU TIÊN để ghi header trước khi FUNC 2 set/clear X-Node-Id/X-Network-Id/X-Client-IP.
+          # Gỡ cả function này + $debug_dump sau khi debug xong: log MỌI request và ghi
+          # Authorization dạng plaintext vào error.log/access.log.
           - |
             return function(conf, ctx)
-              -- raw: đúng byte client gửi (trước khi APISIX sửa X-Forwarded-*), base64 để giữ 1 dòng log.
-              -- parsed: header tại thời điểm này (sau handle_x_forwarded_headers của APISIX core).
-              local core = require("apisix.core")
               local ok, raw = pcall(ngx.req.raw_header, true)
               if not ok then
                 raw = "raw_header_unavailable: " .. tostring(raw)
               end
-              ngx.log(ngx.WARN, "[HDR-DUMP]",
+
+              -- access.log: gộp các dòng header thành 1 dòng, ngăn cách " | ".
+              -- pcall: config chưa khai báo $debug_dump (chưa restart) thì bỏ qua, KHÔNG lỗi 500.
+              local one_line = (raw:gsub("[\r\n]+$", ""))
+              one_line = (one_line:gsub("\r?\n", " | "))
+              pcall(function()
+                ngx.var.debug_dump = one_line
+              end)
+
+              -- error.log: dòng BEGIN + mỗi header 1 dòng.
+              ngx.log(ngx.WARN, "[DEBUG-DUMP] BEGIN",
                 " route=", ctx.matched_route and ctx.matched_route.value.id or "-",
                 " remote_addr=", ngx.var.remote_addr or "-",
                 " pp_addr=", ngx.var.proxy_protocol_addr or "-",
                 " pp_port=", ngx.var.proxy_protocol_port or "-",
                 " server_port=", ngx.var.server_port or "-",
-                " http2=", ngx.var.http2 or "-",
-                " raw_b64=", ngx.encode_base64(raw),
-                " parsed=", core.json.encode(ngx.req.get_headers(0, true)))
+                " http2=", ngx.var.http2 or "-")
+              for line in raw:gmatch("[^\r\n]+") do
+                ngx.log(ngx.WARN, "[DEBUG-DUMP] ", line)
+              end
             end
 
           # ======================================================================
