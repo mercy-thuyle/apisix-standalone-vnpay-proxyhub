@@ -163,4 +163,27 @@ global_rules:
               -- Không inject danh tính client vào request S3.
               -- X-Network-Id vẫn đang được clear ở logic phía trên.
               ngx.req.clear_header("X-Client-IP")
+
+
+            return function(conf, ctx)
+              -- Dump toàn bộ header APISIX nhận được cho MỌI request (global rule → mọi route).
+              -- raw: đúng byte client gửi (trước khi APISIX sửa X-Forwarded-*), base64 để giữ 1 dòng log.
+              -- parsed: header sau khi APISIX xử lý, để so sánh với raw.
+              -- Chỉ dùng khi debug; gỡ block này sau khi xong vì log mọi request và lộ Authorization vào error.log.
+              local core = require("apisix.core")
+              local ok, raw = pcall(ngx.req.raw_header, true)
+              if not ok then
+                raw = "raw_header_unavailable: " .. tostring(raw)
+              end
+              ngx.log(ngx.WARN, "[HDR-DUMP]",
+                " route=", ctx.matched_route and ctx.matched_route.value.id or "-",
+                " remote_addr=", ngx.var.remote_addr or "-",
+                " pp_addr=", ngx.var.proxy_protocol_addr or "-",
+                " pp_port=", ngx.var.proxy_protocol_port or "-",
+                " server_port=", ngx.var.server_port or "-",
+                " http2=", ngx.var.http2 or "-",
+                " raw_b64=", ngx.encode_base64(raw),
+                " parsed=", core.json.encode(ngx.req.get_headers(0, true)))
+            end
+
             end
