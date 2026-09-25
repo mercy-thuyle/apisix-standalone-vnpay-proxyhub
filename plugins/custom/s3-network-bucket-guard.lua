@@ -11,10 +11,10 @@
 -- header này, plugin không áp bucket allowlist và cho request đi tiếp để tầng
 -- S3-storage/Cloudian xử lý xác thực SigV4 cùng quyền bucket/object.
 --
--- Bổ sung 25/09/2026: default_allowlist_key (tùy chọn) — allowlist mặc định trên Vault
--- áp cho request KHÔNG có X-Network-Id hoặc có nhưng network_id chưa onboard trên
--- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
--- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
+-- Bổ sung 25/09/2026: phần tử allowlist có "*" ở CUỐI khớp theo prefix
+-- (vd "proxy-hub-hcm-*"), "*" ở ĐẦU khớp theo suffix (vd "*-proxy-hub-hcm") — cho
+-- bucket client tự tạo với phần id ngẫu nhiên. Áp cho cả allowlist mặc định lẫn
+-- allowlist theo network_id. Xem bucket_in().
 --
 -- Bổ sung 25/09/2026: phần tử allowlist kết thúc bằng "*" khớp theo prefix
 -- (vd "proxy-hub-hcm-*" cho bucket client tự tạo dạng proxy-hub-hcm-<id ngẫu nhiên>).
@@ -163,19 +163,31 @@ end
 
 -- So khớp bucket với allowlist. Mỗi phần tử:
 --   "proxy-hub-hcm"    → khớp CHÍNH XÁC tên bucket.
---   "proxy-hub-hcm-*"  → khớp theo PREFIX (dấu "*" chỉ có nghĩa khi đứng CUỐI):
---                        mọi bucket bắt đầu bằng "proxy-hub-hcm-" (bucket client tự tạo
---                        với hậu tố ngẫu nhiên).
+--   "proxy-hub-hcm-*"  → PREFIX: mọi bucket bắt đầu bằng "proxy-hub-hcm-"
+--                        (bucket client tự tạo với hậu tố ngẫu nhiên).
+--   "*-proxy-hub-hcm"  → SUFFIX: mọi bucket kết thúc bằng "-proxy-hub-hcm"
+--                        (bucket client tự tạo với tiền tố ngẫu nhiên).
+-- "*" chỉ có nghĩa ở ĐẦU hoặc CUỐI phần tử, KHÔNG hỗ trợ cả hai cùng lúc ("*abc*")
+-- hay "*" ở giữa — các dạng đó bị coi là tên chính xác nên không khớp bucket nào.
 -- So sánh chuỗi thuần (string.sub), KHÔNG dùng Lua pattern — tên bucket chứa "-" và "."
 -- là ký tự đặc biệt của pattern, dùng pattern sẽ khớp sai.
--- "*" đứng một mình (prefix rỗng) bị BỎ QUA, không hiểu là "cho phép mọi bucket" —
+-- "*" đứng một mình (phần cố định rỗng) bị BỎ QUA, không hiểu là "cho phép mọi bucket" —
 -- tránh 1 lỗi gõ trên Vault vô hiệu hoá toàn bộ allowlist.
 local function bucket_in(list, bucket)
     for _, allowed in ipairs(list) do
         if type(allowed) == "string" and allowed ~= "" then
-            if allowed:sub(-1) == "*" then
+            local head = allowed:sub(1, 1) == "*"
+            local tail = allowed:sub(-1) == "*"
+
+            if tail and not head then
                 local prefix = allowed:sub(1, -2)
                 if prefix ~= "" and bucket:sub(1, #prefix) == prefix then
+                    return true
+                end
+            elseif head and not tail then
+                local suffix = allowed:sub(2)
+                if suffix ~= "" and #bucket >= #suffix
+                   and bucket:sub(-#suffix) == suffix then
                     return true
                 end
             elseif allowed == bucket then
