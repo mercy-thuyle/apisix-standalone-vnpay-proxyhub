@@ -12,6 +12,13 @@ plugin_configs:
         fail_open: false
         reject_code: 403
 
+        # Allowlist mặc định trên Vault (<vault_mount>/data/<vault_prefix>/_default-hcm) cho request
+        # KHÔNG có X-Network-Id hoặc network_id chưa onboard. Tách key theo site để endpoint HCM
+        # chỉ nhận bucket của site HCM. PHẢI tạo key này trên Vault TRƯỚC khi push — thiếu key
+        # thì mọi request nhắm bucket bị 403 "bucket allowlist not configured".
+        # Xóa dòng này = quay về hành vi cũ (thiếu network_id thì bỏ qua allowlist).
+        default_allowlist_key: "_default-hcm"
+
       # ip-restriction:
       #   # blacklist: []
       #   blacklist:
@@ -34,6 +41,13 @@ plugin_configs:
         cache_ttl: 60
         fail_open: false
         reject_code: 403
+
+        # Allowlist mặc định trên Vault (<vault_mount>/data/<vault_prefix>/_default-hni) cho request
+        # KHÔNG có X-Network-Id hoặc network_id chưa onboard. Tách key theo site để endpoint HNI
+        # chỉ nhận bucket của site HNI. PHẢI tạo key này trên Vault TRƯỚC khi push — thiếu key
+        # thì mọi request nhắm bucket bị 403 "bucket allowlist not configured".
+        # Xóa dòng này = quay về hành vi cũ (thiếu network_id thì bỏ qua allowlist).
+        default_allowlist_key: "_default-hni"
 
       # ip-restriction:
       #   # blacklist: []

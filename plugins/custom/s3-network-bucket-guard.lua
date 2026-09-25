@@ -11,6 +11,11 @@
 -- header này, plugin không áp bucket allowlist và cho request đi tiếp để tầng
 -- S3-storage/Cloudian xử lý xác thực SigV4 cùng quyền bucket/object.
 --
+-- Bổ sung 25/09/2026: default_allowlist_key (tùy chọn) — allowlist mặc định trên Vault
+-- áp cho request KHÔNG có X-Network-Id hoặc có nhưng network_id chưa onboard trên
+-- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
+-- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
+--
 -- Allowlist KHÔNG nằm trong GitOps YAML (route/plugin_config) — nằm trong
 -- Vault KV v2, để team quản lý network onboard/thu hồi tenant KHÔNG cần
 -- đụng vào route/service/GitOps của Gateway team. Plugin này chỉ đọc
@@ -81,6 +86,16 @@ local schema = {
             type = "integer",
             default = 403,
         },
+        default_allowlist_key = {
+            type = "string",
+            minLength = 1,
+            description = "Key Vault (cùng vault_mount/vault_prefix) chứa allowlist mặc định "
+                        .. "cho request không có network_id hoặc network_id chưa có trên Vault. "
+                        .. "Tách theo site (vd _default-hcm/_default-hni) để mỗi endpoint chỉ "
+                        .. "cho bucket của site đó. Không khai = giữ hành vi cũ: thiếu "
+                        .. "network_id thì bỏ qua allowlist. Đã khai mà key không tồn tại "
+                        .. "trên Vault → deny mọi request nhắm bucket (fail-closed).",
+        },
     },
     required = {"apex_host"},
 }
@@ -123,16 +138,46 @@ local function extract_bucket(ctx, apex_host)
     return nil
 end
 
+-- Tra allowlist của 1 key trên Vault. Trả về:
+--   buckets(table), nil        → có allowlist hợp lệ
+--   nil, "not_found"           → key chưa có trên Vault
+--   nil, "malformed"           → có key nhưng thiếu field 'buckets' dạng mảng
+--   nil, <lỗi hạ tầng>         → Vault không truy cập được
+local function fetch_allowlist(conf, key)
+    local data, err = vault_client.get(
+        conf.vault_mount, conf.vault_prefix, key,
+        "network-bucket-allowlist", conf.cache_ttl
+    )
+    if err then
+        return nil, err
+    end
+    if type(data.buckets) ~= "table" then
+        return nil, "malformed"
+    end
+    return data.buckets, nil
+end
+
+local function bucket_in(list, bucket)
+    for _, allowed in ipairs(list) do
+        if allowed == bucket then
+            return true
+        end
+    end
+    return false
+end
+
 function _M.access(conf, ctx)
     local network_id = core.request.header(ctx, conf.network_id_header)
-    if not network_id or network_id == "" then
-        core.log.info("[", plugin_name, "] thiếu header ", conf.network_id_header,
-            " — bỏ qua bucket allowlist")
-        return
+    if network_id == "" then
+        network_id = nil
     end
 
-    local identity = network_id
-    local identity_type = "network_id"
+    -- Không network_id và không khai allowlist mặc định → hành vi cũ: bỏ qua.
+    if not network_id and not conf.default_allowlist_key then
+            core.log.info("[", plugin_name, "] thiếu header ", conf.network_id_header,
+            " và không khai default_allowlist_key — bỏ qua bucket allowlist")
+        return
+    end
 
     local bucket = extract_bucket(ctx, conf.apex_host)
     if bucket == nil then
@@ -147,22 +192,48 @@ function _M.access(conf, ctx)
         return
     end
 
-    local data, err = vault_client.get(
-        conf.vault_mount, conf.vault_prefix, identity,
-        "network-bucket-allowlist", conf.cache_ttl
-    )
+    local allowed_buckets, source, err
 
-    if err == "not_found" then
-        -- identity (network_id hoặc client_ip) chưa được onboard trong Vault —
-        -- LUÔN fail-closed, không phụ thuộc conf.fail_open (đó là cờ cho lỗi
-        -- HẠ TẦNG Vault, không phải cho case "chính sách nói không cho phép").
-        core.log.warn("[", plugin_name, "] ", identity_type, " '", identity,
-            "' không có allowlist trong Vault — deny bucket '", bucket, "'")
-        return conf.reject_code, { error_msg = "network not authorized for any bucket" }
+    -- Bước 1: allowlist riêng của network_id (nếu request có network_id).
+    if network_id then
+        allowed_buckets, err = fetch_allowlist(conf, network_id)
+        source = "network_id '" .. network_id .. "'"
+
+        if err == "not_found" then
+            if not conf.default_allowlist_key then
+                -- Hành vi cũ: network_id chưa onboard → LUÔN fail-closed.
+                core.log.warn("[", plugin_name, "] network_id '", network_id,
+                    "' không có allowlist trong Vault — deny bucket '", bucket, "'")
+                return conf.reject_code, { error_msg = "network not authorized for any bucket" }
+            end
+            core.log.info("[", plugin_name, "] network_id '", network_id,
+                "' chưa có allowlist riêng — dùng allowlist mặc định '",
+                conf.default_allowlist_key, "'")
+            allowed_buckets, err = nil, nil
+        end
+    end
+
+    -- Bước 2: allowlist mặc định (không có network_id, hoặc network_id chưa onboard).
+    if not allowed_buckets and not err then
+        allowed_buckets, err = fetch_allowlist(conf, conf.default_allowlist_key)
+        source = "default '" .. conf.default_allowlist_key .. "'"
+
+        if err == "not_found" then
+            core.log.error("[", plugin_name, "] default_allowlist_key '",
+                conf.default_allowlist_key, "' không tồn tại trên Vault — deny bucket '",
+                bucket, "'")
+            return conf.reject_code, { error_msg = "bucket allowlist not configured" }
+        end
+    end
+
+    if err == "malformed" then
+        core.log.error("[", plugin_name, "] Vault value cho ", source,
+            " thiếu field 'buckets' dạng mảng — coi như deny toàn bộ")
+        return conf.reject_code, { error_msg = "malformed bucket allowlist" }
     end
 
     if err then
-        core.log.error("[", plugin_name, "] Vault lỗi hạ tầng: ", err,
+        core.log.error("[", plugin_name, "] Vault lỗi hạ tầng (", source, "): ", err,
             " — fail_open=", tostring(conf.fail_open))
         if conf.fail_open then
             return
@@ -170,22 +241,13 @@ function _M.access(conf, ctx)
         return 503, { error_msg = "policy backend unavailable" }
     end
 
-    local allowed_buckets = data.buckets
-    if type(allowed_buckets) ~= "table" then
-        core.log.error("[", plugin_name, "] Vault value cho ", identity_type, " '", identity,
-            "' thiếu field 'buckets' dạng mảng — coi như deny toàn bộ")
-        return conf.reject_code, { error_msg = "malformed policy for this network" }
+    if bucket_in(allowed_buckets, bucket) then
+        return
     end
 
-    for _, allowed in ipairs(allowed_buckets) do
-        if allowed == bucket then
-            return
-        end
-    end
-
-    core.log.warn("[", plugin_name, "] ", identity_type, " '", identity,
-        "' không được phép truy cập bucket '", bucket, "'")
-    return conf.reject_code, { error_msg = "bucket not in allowlist for this network" }
+    core.log.warn("[", plugin_name, "] bucket '", bucket, "' không có trong allowlist của ",
+        source)
+    return conf.reject_code, { error_msg = "bucket not in allowlist" }
 end
 
 return _M

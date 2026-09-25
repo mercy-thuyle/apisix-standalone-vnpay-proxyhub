@@ -68,6 +68,7 @@ global_rules:
                 " remote_addr=", ngx.var.remote_addr or "-",
                 " pp_addr=", ngx.var.proxy_protocol_addr or "-",
                 " pp_port=", ngx.var.proxy_protocol_port or "-",
+                " tlv_unique_id=", ngx.var.proxy_protocol_tlv_unique_id or "-",
                 " server_port=", ngx.var.server_port or "-",
                 " http2=", ngx.var.http2 or "-")
               for line in raw:gmatch("[^\r\n]+") do
