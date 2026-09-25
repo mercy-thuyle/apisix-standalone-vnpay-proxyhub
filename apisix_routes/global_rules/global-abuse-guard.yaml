@@ -36,8 +36,40 @@ global_rules:
       serverless-pre-function:
         phase: rewrite
         functions:
+          # ======================================================================
+          # [FUNC 1] HDR-DUMP — dump toàn bộ header ProxyHub nhận được (DEBUG TẠM)
+          # Đặt ĐẦU TIÊN để "parsed" phản ánh header trước khi FUNC 2 set/clear
+          # X-Node-Id/X-Route-Id/X-Network-Id/X-Client-IP. Gỡ cả function này sau
+          # khi debug xong: log MỌI request và lộ Authorization vào error.log.
+          # ======================================================================
           - |
             return function(conf, ctx)
+              -- raw: đúng byte client gửi (trước khi APISIX sửa X-Forwarded-*), base64 để giữ 1 dòng log.
+              -- parsed: header tại thời điểm này (sau handle_x_forwarded_headers của APISIX core).
+              local core = require("apisix.core")
+              local ok, raw = pcall(ngx.req.raw_header, true)
+              if not ok then
+                raw = "raw_header_unavailable: " .. tostring(raw)
+              end
+              ngx.log(ngx.WARN, "[HDR-DUMP]",
+                " route=", ctx.matched_route and ctx.matched_route.value.id or "-",
+                " remote_addr=", ngx.var.remote_addr or "-",
+                " pp_addr=", ngx.var.proxy_protocol_addr or "-",
+                " pp_port=", ngx.var.proxy_protocol_port or "-",
+                " server_port=", ngx.var.server_port or "-",
+                " http2=", ngx.var.http2 or "-",
+                " raw_b64=", ngx.encode_base64(raw),
+                " parsed=", core.json.encode(ngx.req.get_headers(0, true)))
+            end
+
+          # ======================================================================
+          # [FUNC 2] Guard chính — trace SigV4 tạm, header định danh, network identity
+          # ======================================================================
+          - |
+            return function(conf, ctx)
+              -- ==================================================================
+              -- [2.1] TRACE TẠM CHO TEST SigV4 (gỡ sau khi đóng bug #3.17)
+              -- ==================================================================
               -- TRACE TẠM CHO TEST SigV4: chỉ log request do script
               -- s3-proxyhub-path-compare.sh tạo. Không log Authorization,
               -- Signature hoặc giá trị session token.
@@ -110,7 +142,9 @@ global_rules:
                 )
               end
 
-
+              -- ==================================================================
+              -- [2.2] Header định danh node/route/service/consumer (key cho limit-count/limit-conn)
+              -- ==================================================================
               -- NODE_ID lấy từ ENV do docker-compose set (apisix-standalone-${PROJECT}-${DC_SITE}-${ORDER_NUM}).
               -- Đặt ở ĐÂY vì serverless-pre-function (priority 10000) chạy TRƯỚC limit-conn (1003)/
               -- limit-count (1002) trong cùng phase rewrite — header set kịp trước khi 2 plugin limit
@@ -125,6 +159,9 @@ global_rules:
               -- SigV4 thì ctx.consumer là nil → fallback "-".
               ngx.req.set_header("X-Consumer", ctx.consumer and ctx.consumer.username or "-")
 
+              -- ==================================================================
+              -- [2.3] Network identity — X-Network-Id (policy 18/09: tạm tắt, chỉ clear)
+              -- ==================================================================
               -- network_id lấy từ TLV unique_id (0x05) của PROXY-v2, do HAProxy gán tại
               -- tầng ovnmeta-<netid> (unique-id-format <network_id>) trước khi vào unix
               -- socket. KHÔNG lấy từ $remote_addr — sau real_ip_header=proxy_protocol,
@@ -156,6 +193,9 @@ global_rules:
               -- Clear chủ động để không nhận cả X-Network-Id do client tự gửi.
               ngx.req.clear_header("X-Network-Id")
  
+              -- ==================================================================
+              -- [2.4] X-Client-IP — không inject danh tính client vào request upstream
+              -- ==================================================================
               -- Chỉ phục vụ quan sát/debug; không còn được bucket guard dùng
               -- làm Vault identity fallback.
 
@@ -163,27 +203,5 @@ global_rules:
               -- Không inject danh tính client vào request S3.
               -- X-Network-Id vẫn đang được clear ở logic phía trên.
               ngx.req.clear_header("X-Client-IP")
-
-
-            return function(conf, ctx)
-              -- Dump toàn bộ header APISIX nhận được cho MỌI request (global rule → mọi route).
-              -- raw: đúng byte client gửi (trước khi APISIX sửa X-Forwarded-*), base64 để giữ 1 dòng log.
-              -- parsed: header sau khi APISIX xử lý, để so sánh với raw.
-              -- Chỉ dùng khi debug; gỡ block này sau khi xong vì log mọi request và lộ Authorization vào error.log.
-              local core = require("apisix.core")
-              local ok, raw = pcall(ngx.req.raw_header, true)
-              if not ok then
-                raw = "raw_header_unavailable: " .. tostring(raw)
-              end
-              ngx.log(ngx.WARN, "[HDR-DUMP]",
-                " route=", ctx.matched_route and ctx.matched_route.value.id or "-",
-                " remote_addr=", ngx.var.remote_addr or "-",
-                " pp_addr=", ngx.var.proxy_protocol_addr or "-",
-                " pp_port=", ngx.var.proxy_protocol_port or "-",
-                " server_port=", ngx.var.server_port or "-",
-                " http2=", ngx.var.http2 or "-",
-                " raw_b64=", ngx.encode_base64(raw),
-                " parsed=", core.json.encode(ngx.req.get_headers(0, true)))
-            end
 
             end
