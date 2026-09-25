@@ -47,7 +47,9 @@ global_rules:
           # Authorization dạng plaintext vào error.log/access.log.
           - |
             return function(conf, ctx)
-              local ok, raw = pcall(ngx.req.raw_header, true)
+              -- raw_header() KHÔNG tham số = gồm cả request line (GET /uri HTTP/1.1).
+              -- raw_header(true) = BỎ request line, chỉ còn các dòng header.
+              local ok, raw = pcall(ngx.req.raw_header)
               if not ok then
                 raw = "raw_header_unavailable: " .. tostring(raw)
               end
