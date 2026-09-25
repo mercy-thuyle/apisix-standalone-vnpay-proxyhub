@@ -174,7 +174,7 @@ global_rules:
               -- X-Client-IP thay thế. Layer nào thật sự cần BẮT BUỘC network_id (vd
               -- s3-network-bucket-guard) phải tự fail-closed riêng khi thiếu header, guard
               -- này không còn là nơi enforce duy nhất.
-            
+
               -- Tạm thời tắt policy bucket theo network identity: không inject
               -- X-Network-Id từ PROXY-v2 TLV. Bucket guard sẽ bypass Vault
               -- allowlist khi header này không tồn tại; Cloudian xử lý quyền
@@ -192,7 +192,7 @@ global_rules:
               --
               -- Clear chủ động để không nhận cả X-Network-Id do client tự gửi.
               ngx.req.clear_header("X-Network-Id")
- 
+
               -- ==================================================================
               -- [2.4] X-Client-IP — không inject danh tính client vào request upstream
               -- ==================================================================
