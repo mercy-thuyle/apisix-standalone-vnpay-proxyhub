@@ -16,6 +16,10 @@
 -- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
 -- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
 --
+-- Bổ sung 25/09/2026: phần tử allowlist kết thúc bằng "*" khớp theo prefix
+-- (vd "proxy-hub-hcm-*" cho bucket client tự tạo dạng proxy-hub-hcm-<id ngẫu nhiên>).
+-- Áp cho cả allowlist mặc định lẫn allowlist theo network_id. Xem bucket_in().
+--
 -- Allowlist KHÔNG nằm trong GitOps YAML (route/plugin_config) — nằm trong
 -- Vault KV v2, để team quản lý network onboard/thu hồi tenant KHÔNG cần
 -- đụng vào route/service/GitOps của Gateway team. Plugin này chỉ đọc
@@ -157,10 +161,26 @@ local function fetch_allowlist(conf, key)
     return data.buckets, nil
 end
 
+-- So khớp bucket với allowlist. Mỗi phần tử:
+--   "proxy-hub-hcm"    → khớp CHÍNH XÁC tên bucket.
+--   "proxy-hub-hcm-*"  → khớp theo PREFIX (dấu "*" chỉ có nghĩa khi đứng CUỐI):
+--                        mọi bucket bắt đầu bằng "proxy-hub-hcm-" (bucket client tự tạo
+--                        với hậu tố ngẫu nhiên).
+-- So sánh chuỗi thuần (string.sub), KHÔNG dùng Lua pattern — tên bucket chứa "-" và "."
+-- là ký tự đặc biệt của pattern, dùng pattern sẽ khớp sai.
+-- "*" đứng một mình (prefix rỗng) bị BỎ QUA, không hiểu là "cho phép mọi bucket" —
+-- tránh 1 lỗi gõ trên Vault vô hiệu hoá toàn bộ allowlist.
 local function bucket_in(list, bucket)
     for _, allowed in ipairs(list) do
-        if allowed == bucket then
-            return true
+        if type(allowed) == "string" and allowed ~= "" then
+            if allowed:sub(-1) == "*" then
+                local prefix = allowed:sub(1, -2)
+                if prefix ~= "" and bucket:sub(1, #prefix) == prefix then
+                    return true
+                end
+            elseif allowed == bucket then
+                return true
+            end
         end
     end
     return false
