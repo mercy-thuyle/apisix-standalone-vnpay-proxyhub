@@ -65,7 +65,7 @@ local schema = {
             default = 60,
             minimum = 5,
         },
-        z = {
+        fail_open = {
             type = "boolean",
             description = "Khi Vault KHÔNG truy cập được (network/5xx/timeout, "
                         .. "KHÁC với network_id không có trong Vault — case đó "
