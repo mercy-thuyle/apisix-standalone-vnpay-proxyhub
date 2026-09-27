@@ -11,14 +11,29 @@
 -- header này, plugin không áp bucket allowlist và cho request đi tiếp để tầng
 -- S3-storage/Cloudian xử lý xác thực SigV4 cùng quyền bucket/object.
 --
+-- Bổ sung 25/09/2026: default_allowlist_key (tùy chọn) — allowlist mặc định trên Vault
+-- áp cho request KHÔNG có X-Network-Id hoặc có nhưng network_id chưa onboard trên
+-- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
+-- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
+--
 -- Bổ sung 25/09/2026: phần tử allowlist có "*" ở CUỐI khớp theo prefix
 -- (vd "proxy-hub-hcm-*"), "*" ở ĐẦU khớp theo suffix (vd "*-proxy-hub-hcm") — cho
 -- bucket client tự tạo với phần id ngẫu nhiên. Áp cho cả allowlist mặc định lẫn
 -- allowlist theo network_id. Xem bucket_in().
 --
+-- Bổ sung 25/09/2026: default_allowlist_key (tùy chọn) — allowlist mặc định trên Vault
+-- áp cho request KHÔNG có X-Network-Id hoặc có nhưng network_id chưa onboard trên
+-- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
+-- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
+--
 -- Bổ sung 25/09/2026: phần tử allowlist kết thúc bằng "*" khớp theo prefix
 -- (vd "proxy-hub-hcm-*" cho bucket client tự tạo dạng proxy-hub-hcm-<id ngẫu nhiên>).
 -- Áp cho cả allowlist mặc định lẫn allowlist theo network_id. Xem bucket_in().
+--
+-- Bổ sung 27/09/2026: phần tử allowlist hỗ trợ wildcard "*" ở ĐẦU và/hoặc CUỐI —
+-- "abc-*" (prefix), "*-abc" (suffix), "*abc*" (contains) — cho bucket client tự tạo
+-- với phần id ngẫu nhiên ở trước, sau hoặc cả hai phía. Áp cho cả allowlist mặc định
+-- lẫn allowlist theo network_id. Xem bucket_in().
 --
 -- Allowlist KHÔNG nằm trong GitOps YAML (route/plugin_config) — nằm trong
 -- Vault KV v2, để team quản lý network onboard/thu hồi tenant KHÔNG cần
@@ -172,19 +187,35 @@ end
 -- So sánh chuỗi thuần (string.sub), KHÔNG dùng Lua pattern — tên bucket chứa "-" và "."
 -- là ký tự đặc biệt của pattern, dùng pattern sẽ khớp sai.
 -- "*" đứng một mình (phần cố định rỗng) bị BỎ QUA, không hiểu là "cho phép mọi bucket" —
+-- So khớp bucket với allowlist. Mỗi phần tử ("*" = 0 hoặc nhiều ký tự bất kỳ):
+--   "proxy-hub-hcm"     → CHÍNH XÁC tên bucket.
+--   "proxy-hub-hcm-*"   → PREFIX:   bucket bắt đầu bằng "proxy-hub-hcm-".
+--   "*-proxy-hub-hcm"   → SUFFIX:   bucket kết thúc bằng "-proxy-hub-hcm".
+--   "*proxy-hub-hcm-*"  → CONTAINS: bucket chứa "proxy-hub-hcm-" ở bất kỳ vị trí nào
+--                         (id ngẫu nhiên ở trước, sau hoặc cả hai phía; kể cả rỗng).
+-- "*" chỉ có nghĩa ở ĐẦU/CUỐI phần tử; "*" ở GIỮA (vd "a*c") không hỗ trợ — phần tử đó
+-- bị so như tên chính xác nên không khớp bucket nào.
+-- So sánh chuỗi thuần (string.sub / string.find plain=true), KHÔNG dùng Lua pattern —
+-- tên bucket chứa "-" và "." là ký tự đặc biệt của pattern, dùng pattern sẽ khớp sai.
+-- Phần cố định rỗng ("*", "**") bị BỎ QUA, không hiểu là "cho phép mọi bucket" —
 -- tránh 1 lỗi gõ trên Vault vô hiệu hoá toàn bộ allowlist.
 local function bucket_in(list, bucket)
     for _, allowed in ipairs(list) do
         if type(allowed) == "string" and allowed ~= "" then
             local head = allowed:sub(1, 1) == "*"
-            local tail = allowed:sub(-1) == "*"
+            local tail = #allowed > 1 and allowed:sub(-1) == "*"
 
-            if tail and not head then
-                local prefix = allowed:sub(1, -2)
-                if prefix ~= "" and bucket:sub(1, #prefix) == prefix then
+            if head and tail then
+                local middle = allowed:sub(2, -2)
+                if middle ~= "" and bucket:find(middle, 1, true) then
                     return true
                 end
-            elseif head and not tail then
+            elseif tail then
+                local prefix = allowed:sub(1, -2)
+                if bucket:sub(1, #prefix) == prefix then
+                    return true
+                end
+            elseif head then
                 local suffix = allowed:sub(2)
                 if suffix ~= "" and #bucket >= #suffix
                    and bucket:sub(-#suffix) == suffix then
