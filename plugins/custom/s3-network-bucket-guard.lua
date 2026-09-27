@@ -6,40 +6,15 @@
 -- (đã set vào header X-Network-Id bởi global_rule "global-network-identity",
 -- xem apisix_routes/global_rules/global-network-identity.yaml, mục 1).
 --
--- Đổi chính sách 23/09/2026: network_id là identity tùy chọn. Khi request có
--- X-Network-Id, plugin tra Vault và enforce bucket allowlist. Khi không có
--- header này, plugin không áp bucket allowlist và cho request đi tiếp để tầng
--- S3-storage/Cloudian xử lý xác thực SigV4 cùng quyền bucket/object.
+-- Giới hạn bucket S3 được phép đi qua ProxyHub (mục 4 kế hoạch triển khai ProxyHub).
+-- Khác cơ chế consumer_groups/consumer-restriction bên cụm S3-storage (theo SigV4/AKID):
+-- ở đây chỉ quyết định bucket nào được ĐI QUA gateway; quyền đọc/ghi bucket/object vẫn do
+-- Cloudian xác thực theo SigV4 của chính request.
 --
--- Bổ sung 25/09/2026: default_allowlist_key (tùy chọn) — allowlist mặc định trên Vault
--- áp cho request KHÔNG có X-Network-Id hoặc có nhưng network_id chưa onboard trên
--- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
--- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
---
--- Bổ sung 25/09/2026: phần tử allowlist có "*" ở CUỐI khớp theo prefix
--- (vd "proxy-hub-hcm-*"), "*" ở ĐẦU khớp theo suffix (vd "*-proxy-hub-hcm") — cho
--- bucket client tự tạo với phần id ngẫu nhiên. Áp cho cả allowlist mặc định lẫn
--- allowlist theo network_id. Xem bucket_in().
---
--- Bổ sung 25/09/2026: default_allowlist_key (tùy chọn) — allowlist mặc định trên Vault
--- áp cho request KHÔNG có X-Network-Id hoặc có nhưng network_id chưa onboard trên
--- Vault. Thứ tự tra: allowlist riêng của network_id (nếu có) → allowlist mặc định.
--- Không khai default_allowlist_key → giữ hành vi cũ (thiếu network_id thì bỏ qua).
---
--- Bổ sung 25/09/2026: phần tử allowlist kết thúc bằng "*" khớp theo prefix
--- (vd "proxy-hub-hcm-*" cho bucket client tự tạo dạng proxy-hub-hcm-<id ngẫu nhiên>).
--- Áp cho cả allowlist mặc định lẫn allowlist theo network_id. Xem bucket_in().
---
--- Bổ sung 27/09/2026: phần tử allowlist hỗ trợ wildcard "*" ở ĐẦU và/hoặc CUỐI —
--- "abc-*" (prefix), "*-abc" (suffix), "*abc*" (contains) — cho bucket client tự tạo
--- với phần id ngẫu nhiên ở trước, sau hoặc cả hai phía. Áp cho cả allowlist mặc định
--- lẫn allowlist theo network_id. Xem bucket_in().
---
--- Allowlist KHÔNG nằm trong GitOps YAML (route/plugin_config) — nằm trong
--- Vault KV v2, để team quản lý network onboard/thu hồi tenant KHÔNG cần
--- đụng vào route/service/GitOps của Gateway team. Plugin này chỉ đọc
--- (read-only) Vault tại request-time, có cache để không gọi Vault mỗi
--- request (xem plugins/libraries/vault-kv-client.lua).
+-- Allowlist KHÔNG nằm trong GitOps YAML (route/plugin_config) mà nằm trên Vault KV v2,
+-- để onboard/thu hồi bucket không phải đụng route/service/GitOps của Gateway team.
+-- Plugin chỉ đọc (read-only) Vault tại request-time, có cache theo cache_ttl
+-- (xem plugins/libraries/vault-kv-client.lua).
 
 local core = require("apisix.core")
 local vault_client = require("vault-kv-client")
@@ -51,8 +26,9 @@ local schema = {
     properties = {
         network_id_header = {
             type = "string",
-            description = "Header chứa network_id, do global-network-identity set. "
-                        .. "Không bắt buộc: thiếu header thì bỏ qua bucket allowlist.",
+            description = "Header chứa network_id (TLV 0x05 của PROXY-v2), do "
+                        .. "global_rules/global-abuse-guard.yaml set. Không bắt buộc: "
+                        .. "thiếu header thì dùng default_allowlist_key (nếu có khai).",
             default = "X-Network-Id",
         },
         apex_host = {
@@ -229,16 +205,26 @@ local function bucket_in(list, bucket)
     return false
 end
 
+-- Thứ tự quyết định:
+--   1. Không nhắm bucket cụ thể (ListBuckets "/")            → cho qua.
+--   2. Có network_id VÀ network_id đã có allowlist trên Vault → dùng allowlist đó
+--      (THAY THẾ allowlist mặc định, không cộng dồn — cho phép siết 1 network chặt hơn).
+--   3. Không network_id, hoặc network_id chưa onboard          → dùng default_allowlist_key.
+--   4. Bucket không khớp allowlist                             → reject_code.
+-- Không khai default_allowlist_key → thiếu network_id thì bỏ qua allowlist (Cloudian tự
+-- xử lý quyền theo SigV4); network_id chưa onboard thì luôn fail-closed.
 function _M.access(conf, ctx)
+    -- network_id là identity TÙY CHỌN: HAProxy phía trước có gửi TLV 0x05 thì
+    -- global-abuse-guard.yaml set header này; không có thì request vẫn được xét
+    -- theo allowlist mặc định.
     local network_id = core.request.header(ctx, conf.network_id_header)
     if network_id == "" then
         network_id = nil
     end
 
-    -- Không network_id và không khai allowlist mặc định → hành vi cũ: bỏ qua.
     if not network_id and not conf.default_allowlist_key then
-            core.log.info("[", plugin_name, "] thiếu header ", conf.network_id_header,
-            " và không khai default_allowlist_key — bỏ qua bucket allowlist")
+        core.log.info("[", plugin_name, "] thiếu header ", conf.network_id_header,
+        " và không khai default_allowlist_key — bỏ qua bucket allowlist")
         return
     end
 
@@ -257,14 +243,15 @@ function _M.access(conf, ctx)
 
     local allowed_buckets, source, err
 
-    -- Bước 1: allowlist riêng của network_id (nếu request có network_id).
+    -- Allowlist riêng của network_id (nếu request có network_id).
     if network_id then
         allowed_buckets, err = fetch_allowlist(conf, network_id)
         source = "network_id '" .. network_id .. "'"
 
         if err == "not_found" then
             if not conf.default_allowlist_key then
-                -- Hành vi cũ: network_id chưa onboard → LUÔN fail-closed.
+                -- Không có allowlist mặc định để rơi về → network lạ LUÔN fail-closed,
+                -- không phụ thuộc fail_open (fail_open chỉ dành cho lỗi hạ tầng Vault).
                 core.log.warn("[", plugin_name, "] network_id '", network_id,
                     "' không có allowlist trong Vault — deny bucket '", bucket, "'")
                 return conf.reject_code, { error_msg = "network not authorized for any bucket" }
@@ -276,7 +263,9 @@ function _M.access(conf, ctx)
         end
     end
 
-    -- Bước 2: allowlist mặc định (không có network_id, hoặc network_id chưa onboard).
+    -- Allowlist mặc định (không có network_id, hoặc network_id chưa onboard).
+    -- Key đã khai mà chưa tạo trên Vault → fail-closed: thiếu cấu hình không được
+    -- hiểu là "cho mọi bucket".
     if not allowed_buckets and not err then
         allowed_buckets, err = fetch_allowlist(conf, conf.default_allowlist_key)
         source = "default '" .. conf.default_allowlist_key .. "'"
@@ -295,6 +284,8 @@ function _M.access(conf, ctx)
         return conf.reject_code, { error_msg = "malformed bucket allowlist" }
     end
 
+    -- Lỗi hạ tầng Vault (timeout, 5xx, token hết hạn → 403): fail_open quyết định
+    -- ưu tiên uptime S3 (true) hay đúng chính sách (false, mặc định → 503).
     if err then
         core.log.error("[", plugin_name, "] Vault lỗi hạ tầng (", source, "): ", err,
             " — fail_open=", tostring(conf.fail_open))
